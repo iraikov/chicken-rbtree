@@ -20,7 +20,7 @@ Looking up an arbitrary or the min/max keys, and deleting the min/max
 keys require no more key comparisons than the depth of the tree, which
 is `O(log n)` where `n` is the total number of keys in the tree.
 
-=== Procedures
+### Procedures
 
 The persistent map instance is created by procedure `rb-tree-map`:
 
@@ -61,7 +61,7 @@ The `<PersistentMap>` typeclass contains the following operations:
 ; `fold-right-limit TREE` : returns a procedure `LAMBDA PRED PROC INITIAL` such that, given the associations in the tree ordered by the descending order of keys: `(key-1 . value-1) (key-2 . value-2) ... (key-i . value-1) ` the procedure returns the result of the successive function applications `(PROC value-i ... (PROC value-1 INITIAL)`, where `i <= n` and `(PRED x)` does not hold true for all `x = (PROC value-1 INITIAL)  ... (PROC (value-i) (PROC value-(i-1)...`. 
 
 
-== Examples
+## Examples
 
 ```scheme
 
