@@ -13,7 +13,7 @@ of red-black trees, which is in turn based on Chris Okasaki's
 implementation of red-black trees.  The delete function is based on
 the description in Cormen, Leiserson, and Rivest.
 
-The present implementation code defines a persistent map [[typeclass]]
+The present implementation code defines a persistent map typeclass
 that implements an ordered dictionary mapping of keys to values.
 
 Looking up an arbitrary or the min/max keys, and deleting the min/max
