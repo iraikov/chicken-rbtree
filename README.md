@@ -43,7 +43,8 @@ The `<PersistentMap>` typeclass contains the following operations:
 * `get-min TREE` : returns a (key . value) pair for an association in the tree with the smallest key. If the  tree is empty, an error is signalled.
 * `get-max TREE` : returns a (key . value) pair for an association in the tree with the largest key. If the tree is empty, an error is signalled.
 * `size TREE` : returns the size (the number of associations) in the tree
-* `put TREE KEY VALUE` : returns a new  tree object that contains the given association
+* `put TREE KEY VALUE` : returns a new tree object that contains the given association; if the key was already in the tree, the association will be replaced. 
+* `update TREE KEY VALUE MERGE-FN` : returns a new  tree object that contains the given association; if the key was already in the tree, procedure `MERGE-FN` is used to merge the old and new values.
 * `delete TREE KEY . DEFAULT-CLAUSE` : if the specified key is found, it returns a new tree object that no longer contains the association specified by that key, while the original tree object is unmodified. If the key is not found, the procedure returns the result of evaluating `DEFAULT-CLAUSE`
 * `for-each-ascending TREE` : returns a procedure `LAMBDA PROC` that will apply the given procedure PROC to each (key . value) association of the tree, from the one with the smallest key all the way to the one with the max key, in an ascending order of keys. 
 * `for-each-descending TREE` : returns a procedure `LAMBDA PROC` that will apply the given procedure `PROC`to each (key . value) association of the tree, in the descending order of keys. 
