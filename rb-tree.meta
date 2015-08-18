@@ -1,0 +1,27 @@
+;;;; -*- Hen -*-
+
+((egg "rb-tree.egg") ; This should never change
+
+ ; List here all the files that should be bundled as part of your egg.  
+
+ (files "rb-tree.scm" "rb-tree.setup" "rb-tree.meta" "tests")
+
+ ; Your egg's license:
+
+ (license "GPL-3")
+
+ ; Pick one from the list of categories (see below) for your egg and
+ ; enter it here.
+
+ (category data)
+
+ ; A list of eggs rb-tree depends on.
+
+ (needs datatype matchable typeclass)
+
+ (test-depends test)
+
+ (author "Ivan Raikov")
+
+ (synopsis "A sorted dictionary data structure based on red-black trees."))
+
