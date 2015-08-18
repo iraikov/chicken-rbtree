@@ -112,6 +112,7 @@
   list-keys
   list-values
   put
+  update
   delete
   for-each-ascending
   for-each-descending
@@ -225,10 +226,10 @@
 
 
 ;; Adds a new association to the tree (or replaces the old one if existed).
-(define (insert key-compare root key value)
+(define (insert key-compare value-merge root key value)
     (let ins ((root root))
       (cases tree root
-	   (Empty ()  (values #f (Tree R (Empty) key value (Empty))))
+	   (Empty ()  (Tree R (Empty) key value (Empty)))
 	   (Tree (color a yk y b)  
 		 (dispatch-on-key key-compare 
 		      key yk 
@@ -238,48 +239,44 @@
 			      (dispatch-on-key key-compare
 			       key zk
 			       ;; Case 1.1: key < zk
-			       (let-values (((found? c1) (ins c)))
-				 (values found?
-					 (match c1
-						(($ tree 'Tree 'Red e wk w f)
-						 (Tree R (Tree B e wk w f) zk z (Tree B d yk y b)))
-						(else  (Tree B (Tree R c1 zk z d) yk y b)))))
+			       (let ((c1 (ins c)))
+                                 (match c1
+                                        (($ tree 'Tree 'Red e wk w f)
+                                         (Tree R (Tree B e wk w f) zk z (Tree B d yk y b)))
+                                        (else  (Tree B (Tree R c1 zk z d) yk y b))))
 			       ;; Case 1.2: key = zk
-			       (values a (Tree color (Tree R c key value d) yk y b))
+			       (Tree color (Tree R c key (value-merge value z) d) yk y b)
 			       ;; Case 1.3: key > zk
-			       (let-values (((found? d1) (ins d)))
-				 (values found?
-					 (match d1
-						(($ tree 'Tree 'Red e wk w f)
-						 (Tree R (Tree B c zk z e)  wk  w  (Tree B f yk y b)))
-						(else (Tree B (Tree R c zk z d1) yk y b)))))))
-			     (else  (let-values (((found? a1)  (ins a)))
-				      (values found? (Tree B a1 yk y b)))))
+			       (let ((d1 (ins d)))
+                                 (match d1
+                                        (($ tree 'Tree 'Red e wk w f)
+                                         (Tree R (Tree B c zk z e)  wk  w  (Tree B f yk y b)))
+                                        (else (Tree B (Tree R c zk z d1) yk y b))))))
+			     (else (let ((a1  (ins a)))
+                                     (Tree B a1 yk y b))))
 		      ;; Case 2: key  = yk
-		      (values root (Tree color a key value b))
+		      (Tree color a key (value-merge value y) b)
 		      ;; Case 3: key  > yk
 		      (match b
 			     (($ tree 'Tree 'Red c zk z d)
 			      (dispatch-on-key key-compare
 			       key zk
 			       ;; Case 3.1: key < zk
-			       (let-values (((found? c1) (ins c)))
-				 (values found?
-					 (match c1
-						(($ tree 'Tree 'Red e wk w f)
-						 (Tree R (Tree B a yk y e)  wk  w (Tree B f zk z d)))
-						(else (Tree B a yk y (Tree R c1 zk z d))))))
+			       (let ((c1 (ins c)))
+                                 (match c1
+                                        (($ tree 'Tree 'Red e wk w f)
+                                         (Tree R (Tree B a yk y e)  wk  w (Tree B f zk z d)))
+                                        (else (Tree B a yk y (Tree R c1 zk z d)))))
 			       ;; Case 3.2: key = zk
-			       (values b (Tree color a yk y (Tree R c key value d)))
+			       (Tree color a yk y (Tree R c key (value-merge value z) d))
 			       ;; Case 3.3: key > zk
-			       (let-values (((found? d1) (ins d)))
-				 (values found?
-					 (match d1
-						(($ tree 'Tree 'Red e wk w f)
-						 (Tree R (Tree B a yk y c)  zk z (Tree B e wk w f)))
-						(else (Tree B a yk y (Tree R c zk z d1))))))))
-			     (else (let-values (((found? b1) (ins b)))
-				     (values found? (Tree B a yk y b1)))))))))
+			       (let ((d1 (ins d)))
+                                 (match d1
+                                        (($ tree 'Tree 'Red e wk w f)
+                                         (Tree R (Tree B a yk y c)  zk z (Tree B e wk w f)))
+                                        (else (Tree B a yk y (Tree R c zk z d1)))))))
+			     (else (let ((b1 (ins b)))
+				     (Tree B a yk y b1))))))))
     )
 
 
@@ -759,7 +756,12 @@
 	  
        ;; put
        (lambda (root key value)
-         (let-values (((found? new-root)  (insert insdel-key-compare root key value)))
+         (let ((new-root (insert insdel-key-compare (lambda (x ax) x) root key value)))
+           new-root))
+	  
+       ;; update
+       (lambda (root key value merge-fn)
+         (let ((new-root (insert insdel-key-compare merge-fn root key value)))
            new-root))
 	  
        ;; delete

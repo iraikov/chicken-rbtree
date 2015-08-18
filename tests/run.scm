@@ -27,7 +27,7 @@
        (let ((t (empty)))
        (test-assert  (empty? t))
        (test-assert (zero? (size t)))
-     ))
+       ))
      ))
 
   (test-group (sprintf "loading a sequence [~A,~A] in ascending order" min-key max-key)

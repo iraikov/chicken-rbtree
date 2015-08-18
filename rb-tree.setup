@@ -15,6 +15,6 @@
   `(,(dynld-name "rb-tree") ,(dynld-name "rb-tree.import"))
   
   ; Assoc list with properties for your extension:
-  '((version 5.0)
+  '((version 5.1)
     ))
 
