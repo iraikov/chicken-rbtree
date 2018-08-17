@@ -3,10 +3,10 @@
 ;; Verifying the rb-tree package
 ;;
 
-(require-extension typeclass srfi-1 rb-tree test)
+(import scheme (chicken base) (chicken format) typeclass srfi-1 rb-tree test)
 
-(define (++ x) (fx+ 1 x))
-(define (-- x) (fx- x 1))
+(define (++ x) (+ 1 x))
+(define (-- x) (- x 1))
 
 (define min-key 1) 
 (define max-key 10000)

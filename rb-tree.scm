@@ -12,7 +12,7 @@
 ;; Some helper code was borrowed from treap.scm by Oleg Kiselyov.
 ;;
 ;;
-;; Copyright 2007-2016 Ivan Raikov.
+;; Copyright 2007-2018 Ivan Raikov.
 ;;
 ;;
 ;; This program is free software: you can redistribute it and/or
@@ -37,12 +37,11 @@
    <PersistentMap> 
    )
 
-  (import scheme chicken)
-  
-  (require-extension datatype matchable typeclass)
-
-  (import (only data-structures conc identity))
-
+  (import scheme (chicken base)
+          (chicken memory representation)
+          (only (chicken string) conc)
+          datatype matchable typeclass)
+  (import-for-syntax srfi-1)
 
 ;;
 ;; Persistent map typeclass
@@ -204,25 +203,26 @@
 ;;
 ;; This macro was borrowed from treap.scm by Oleg Kiselyov
 ;;
-(define-syntax dispatch-on-key 
-  (lambda (x r c)
-    (let ((key-compare (second x)) 
-	  (key         (third x)) 	  
-	  (node-key    (fourth x))
-	  (on-less     (fifth x)) 
-	  (on-equal    (sixth x)) 
-	  (on-greater  (seventh x)))
-      (let ((%let   (r 'let))
-	    (%cond  (r 'cond))
-	    (%else  (r 'else))
-	    (%zero?  (r 'zero?))
-	    (%positive?  (r 'positive?))
-	    (result (r 'result)))
-	`(,%let ((,result (,key-compare ,key ,node-key )))
-		(,%cond
-		 ((,%zero? ,result)     ,on-equal)
-		 ((,%positive? ,result) ,on-greater)
-		 (,%else                ,on-less)))))))
+(define-syntax dispatch-on-key
+  (er-macro-transformer
+   (lambda (x r c)
+     (let ((key-compare (second x)) 
+           (key         (third x)) 	  
+           (node-key    (fourth x))
+           (on-less     (fifth x)) 
+           (on-equal    (sixth x)) 
+           (on-greater  (seventh x)))
+       (let ((%let   (r 'let))
+             (%cond  (r 'cond))
+             (%else  (r 'else))
+             (%zero?  (r 'zero?))
+             (%positive?  (r 'positive?))
+             (result (r 'result)))
+         `(,%let ((,result (,key-compare ,key ,node-key )))
+                 (,%cond
+                  ((,%zero? ,result)     ,on-equal)
+                  ((,%positive? ,result) ,on-greater)
+                  (,%else                ,on-less))))))))
 
 
 ;; Adds a new association to the tree (or replaces the old one if existed).
@@ -235,13 +235,13 @@
 		      key yk 
 		      ;; Case 1: key < yk
 		      (match a
-			     (($ tree 'Tree 'Red c zk z d)
+			     (($ rb-tree#tree 'Tree 'Red c zk z d)
 			      (dispatch-on-key key-compare
 			       key zk
 			       ;; Case 1.1: key < zk
 			       (let ((c1 (ins c)))
                                  (match c1
-                                        (($ tree 'Tree 'Red e wk w f)
+                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
                                          (Tree R (Tree B e wk w f) zk z (Tree B d yk y b)))
                                         (else  (Tree B (Tree R c1 zk z d) yk y b))))
 			       ;; Case 1.2: key = zk
@@ -249,7 +249,7 @@
 			       ;; Case 1.3: key > zk
 			       (let ((d1 (ins d)))
                                  (match d1
-                                        (($ tree 'Tree 'Red e wk w f)
+                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
                                          (Tree R (Tree B c zk z e)  wk  w  (Tree B f yk y b)))
                                         (else (Tree B (Tree R c zk z d1) yk y b))))))
 			     (else (let ((a1  (ins a)))
@@ -258,13 +258,13 @@
 		      (Tree color a key (value-merge value y) b)
 		      ;; Case 3: key  > yk
 		      (match b
-			     (($ tree 'Tree 'Red c zk z d)
+			     (($ rb-tree#tree 'Tree 'Red c zk z d)
 			      (dispatch-on-key key-compare
 			       key zk
 			       ;; Case 3.1: key < zk
 			       (let ((c1 (ins c)))
                                  (match c1
-                                        (($ tree 'Tree 'Red e wk w f)
+                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
                                          (Tree R (Tree B a yk y e)  wk  w (Tree B f zk z d)))
                                         (else (Tree B a yk y (Tree R c1 zk z d)))))
 			       ;; Case 3.2: key = zk
@@ -272,7 +272,7 @@
 			       ;; Case 3.3: key > zk
 			       (let ((d1 (ins d)))
                                  (match d1
-                                        (($ tree 'Tree 'Red e wk w f)
+                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
                                          (Tree R (Tree B a yk y c)  zk z (Tree B e wk w f)))
                                         (else (Tree B a yk y (Tree R c zk z d1)))))))
 			     (else (let ((b1 (ins b)))
@@ -314,9 +314,9 @@
 
   (define (zip zipper tree)
     (match (cons zipper tree)
-	   ((($ zipper 'Top) . a)  tree)
-	   ((($ zipper 'Left color xk x b z) . a)   (zip z (Tree color a xk x b)))
-	   ((($ zipper 'Right color a xk x z) . b)  (zip z (Tree color a xk x b)))))
+	   ((($ rb-tree#zipper 'Top) . a)  tree)
+	   ((($ rb-tree#zipper 'Left color xk x b z) . a)   (zip z (Tree color a xk x b)))
+	   ((($ rb-tree#zipper 'Right color a xk x z) . b)  (zip z (Tree color a xk x b)))))
   
   ;; bbZip propagates a black deficit up the tree until either
   ;; the top is reached, or the deficit can be covered.  It
@@ -324,56 +324,56 @@
   ;; and the zipped tree.
   (define (bbZip zipper tree)
     (match (cons zipper tree)
-	   ((($ zipper 'Top) . a)  (cons #t a))
+	   ((($ rb-tree#zipper 'Top) . a)  (cons #t a))
 	   ;; case 1L 
-	   ((($ zipper 'Left 'Black xk x ($ tree 'Tree 'Red c yk y d) z) . a)
+	   ((($ rb-tree#zipper 'Left 'Black xk x ($ rb-tree#tree 'Tree 'Red c yk y d) z) . a)
 	    (bbZip (Left R xk x c (Left B yk y d z)) a))
 	   ;; case 3L 
-	   ((($ zipper 'Left color xk x ($ tree 'Tree 'Black ($ tree 'Tree 'Red c yk y d) wk w e) z) . a)
+	   ((($ rb-tree#zipper 'Left color xk x ($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Tree 'Red c yk y d) wk w e) z) . a)
 	    (bbZip (Left color xk x (Tree B c yk y (Tree R d wk w e)) z) a))
 	   ;; case 4L 
-	   ((($ zipper 'Left color xk x ($ tree 'Tree 'Black c yk y ($ tree 'Tree 'Red d wk w e)) z) . a)
+	   ((($ rb-tree#zipper 'Left color xk x ($ rb-tree#tree 'Tree 'Black c yk y ($ rb-tree#tree 'Tree 'Red d wk w e)) z) . a)
 	    (cons #f (zip z (Tree color (Tree B a xk x c) yk y (Tree B d wk w e)))))
 	   ;; case 2L 
-	   ((($ zipper 'Left 'Red xk x ($ tree 'Tree 'Black c yk y d) z) . a)
+	   ((($ rb-tree#zipper 'Left 'Red xk x ($ rb-tree#tree 'Tree 'Black c yk y d) z) . a)
 	    (cons #f (zip z (Tree B a xk x (Tree R c yk y d)))))
 	   ;; case 2L 
-	   ((($ zipper 'Left 'Black xk x ($ tree 'Tree 'Black c yk y d) z) . a)
+	   ((($ rb-tree#zipper 'Left 'Black xk x ($ rb-tree#tree 'Tree 'Black c yk y d) z) . a)
 	    (bbZip z (Tree B a xk x (Tree R c yk y d))))
 	   ;; case 1R 
-	   ((($ zipper 'Right color ($ tree 'Tree 'Red c yk y d) xk x z) . b) 
+	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Red c yk y d) xk x z) . b) 
 	    (bbZip (Right R d xk x (Right B c yk y z)) b))
 	   ;; case 3R 
-	   ((($ zipper 'Right color ($ tree 'Tree 'Black ($ tree 'Tree 'Red c wk w d) yk y e) xk x z) . b) 
+	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Tree 'Red c wk w d) yk y e) xk x z) . b) 
 	    (bbZip (Right color (Tree B c wk w (Tree R d yk y e)) xk x z) b))
 	   ;; case 4R
-	   ((($ zipper 'Right color ($ tree 'Tree 'Black c yk y ($ tree 'Tree 'Red d wk w e)) xk x z) . b) 
+	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black c yk y ($ rb-tree#tree 'Tree 'Red d wk w e)) xk x z) . b) 
 	    (cons #f (zip z (Tree color c yk y (Tree B (Tree R d wk w e) xk x b)))))
 	   ;; case 2R 
-	   ((($ zipper 'Right 'Red ($ tree 'Tree 'Black c yk y d) xk x z) . b) 
+	   ((($ rb-tree#zipper 'Right 'Red ($ rb-tree#tree 'Tree 'Black c yk y d) xk x z) . b) 
 	    (cons #f (zip z (Tree B (Tree R c yk y d) xk x b))))
 	   ;; case 2R 
-	   ((($ zipper 'Right 'Black ($ tree 'Tree 'Black c yk y d) xk x z) . b) 
+	   ((($ rb-tree#zipper 'Right 'Black ($ rb-tree#tree 'Tree 'Black c yk y d) xk x z) . b) 
 	    (bbZip z (Tree B (Tree R c yk y d) xk x b)))
 	   (else   (cons #f (zip zipper tree)))))
   
   (define (delMin tree z)
     (match tree
-	   (($ tree 'Tree 'Red ($ tree 'Empty) yk y b) 
+	   (($ rb-tree#tree 'Tree 'Red ($ rb-tree#tree 'Empty) yk y b) 
 	    (values yk y (cons #f (zip z b))))
-	   (($ tree 'Tree 'Black ($ tree Empty) yk y b) 
+	   (($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree Empty) yk y b) 
 	    (values yk y (bbZip z b)))
-	   (($ tree 'Tree color a yk y b) 
+	   (($ rb-tree#tree 'Tree color a yk y b) 
 	    (delMin a (Left color yk y b z)))
-	   (($ tree 'Empty) (rb-tree:error 'delete "invalid tree"))))
+	   (($ rb-tree#tree 'Empty) (rb-tree:error 'delete "invalid tree"))))
   
   (define join
     (match-lambda* 
-     (( 'Red ($ tree 'Empty) ($ tree 'Empty) z)  
+     (( 'Red ($ rb-tree#tree 'Empty) ($ rb-tree#tree 'Empty) z)  
       (zip z (Empty)))
-     (( _ a ($ tree 'Empty) z)  
+     (( _ a ($ rb-tree#tree 'Empty) z)  
       (cdr  (bbZip z a)))
-     (( _ ($ tree 'Empty) b z)
+     (( _ ($ rb-tree#tree 'Empty) b z)
       (cdr  (bbZip z b)))
      ((color a b z)
       (let-values (((xk x b)  (delMin b (Top))))
@@ -383,8 +383,8 @@
   
   (define (del tree key z)
     (match tree 
-	   (($ tree 'Empty)  #f)
-	   (($ tree 'Tree color a yk y b)  
+	   (($ rb-tree#tree 'Empty)  #f)
+	   (($ rb-tree#tree 'Tree color a yk y b)  
 	    (dispatch-on-key key-compare 
 	     key yk 
 	     (del a key (Left color yk y b z))
@@ -397,18 +397,18 @@
 (define (get-min root)
   (define (f root)
     (match root
-	   (($ tree 'Empty)  #f)
-	   (($ tree 'Tree _ _ ($ tree 'Empty) xk x _)  (cons xk x))
-	   (($ tree 'Tree _ a _ _ _)   (f a))))
+	   (($ rb-tree#tree 'Empty)  #f)
+	   (($ rb-tree#tree 'Tree _ _ ($ rb-tree#tree 'Empty) xk x _)  (cons xk x))
+	   (($ rb-tree#tree 'Tree _ a _ _ _)   (f a))))
   (f root))
 
 
 (define (get-max root)
   (define (f root)
     (match root
-	   (($ tree 'Empty)  #f)
-	   (($ tree 'Tree _ _ xk x ($ tree 'Empty))  (cons xk x))
-	   (($ tree 'Tree _ _ _ _ b)   (f b))))
+	   (($ rb-tree#tree 'Empty)  #f)
+	   (($ rb-tree#tree 'Tree _ _ xk x ($ rb-tree#tree 'Empty))  (cons xk x))
+	   (($ rb-tree#tree 'Tree _ _ _ _ b)   (f b))))
   (f root))
 
 
@@ -416,8 +416,8 @@
   (lambda (p f init) 
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a _ x b)  
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a _ x b)  
 	      (if (p ax) ax (foldf b (f x (foldf a ax)))))))
     (foldf root init)))
 
@@ -426,8 +426,8 @@
   (lambda (p f init) 
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a _ x b)  
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a _ x b)  
 	      (if (p ax) ax (foldf a (f x (foldf b ax)))))))
     (foldf root init)))
 
@@ -436,8 +436,8 @@
   (lambda (p f init) 
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a _ x b)  
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a _ x b)  
 	      (if (p x) (foldf b (f x (foldf a ax))) ax))))
     (foldf root init)))
 
@@ -446,8 +446,8 @@
   (lambda (p f init) 
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a xk x b)  
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a xk x b)  
 	      (if (p xk x) (foldf b (f xk x (foldf a ax))) ax))))
     (foldf root init)))
 
@@ -456,8 +456,8 @@
   (lambda (p f init) 
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a _ x b)  
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a _ x b)  
 	      (if (p x) (foldf a (f x (foldf b ax))) ax))))
     (foldf root init)))
 
@@ -466,8 +466,8 @@
   (lambda (p f init) 
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a xk x b)  
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a xk x b)  
 	      (if (p xk x) (foldf a (f xk x (foldf b ax))) ax))))
     (foldf root init)))
 
@@ -476,8 +476,8 @@
   (lambda (f init)
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a _ x b)  (foldf b (f x (foldf a ax))))))
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a _ x b)  (foldf b (f x (foldf a ax))))))
     (foldf root init)))
 
 
@@ -485,8 +485,8 @@
   (lambda (f init)
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a xk x b)  (foldf b (f xk x (foldf a ax))))))
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a xk x b)  (foldf b (f xk x (foldf a ax))))))
     (foldf root init)))
 
 
@@ -494,8 +494,8 @@
   (lambda (f init)
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a _ x b)  (foldf a (f x (foldf b ax))))))
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a _ x b)  (foldf a (f x (foldf b ax))))))
     (foldf root init)))
 
 
@@ -503,8 +503,8 @@
   (lambda (f init)
     (define (foldf tree ax)
       (match tree
-	     (($ tree 'Empty)  ax)
-	     (($ tree 'Tree _ a xk x b)  (foldf a (f xk x (foldf b ax))))))
+	     (($ rb-tree#tree 'Empty)  ax)
+	     (($ rb-tree#tree 'Tree _ a xk x b)  (foldf a (f xk x (foldf b ax))))))
     (foldf root init)))
 
 
@@ -522,24 +522,24 @@
 (define (for-each-ascending root )
   (define (appf f tree)
     (match tree
-	   (($ tree 'Empty)  (void))
-	   (($ tree 'Tree _ a k x b)  (begin (appf f a) (f (cons k x)) (appf f b)))))
+	   (($ rb-tree#tree 'Empty)  (void))
+	   (($ rb-tree#tree 'Tree _ a k x b)  (begin (appf f a) (f (cons k x)) (appf f b)))))
   (lambda (f) (appf f root)))
 
 
 (define (for-each-descending root)
   (define (appf f tree)
     (match tree
-	   (($ tree 'Empty)  (void))
-	   (($ tree 'Tree _ a k x b)  (begin (appf f b) (f (cons k x)) (appf f a)))))
+	   (($ rb-tree#tree 'Empty)  (void))
+	   (($ rb-tree#tree 'Tree _ a k x b)  (begin (appf f b) (f (cons k x)) (appf f a)))))
   (lambda (f) (appf f root)))
   
 
 (define (mapv root)
   (define (mapf f tree)
     (match tree
-	   (($ tree 'Empty)  (Empty))
-	   (($ tree 'Tree color a xk x b)  
+	   (($ rb-tree#tree 'Empty)  (Empty))
+	   (($ rb-tree#tree 'Tree color a xk x b)  
 	    (Tree color (mapf f a) xk (f x) (mapf f b)))))
   (lambda (f) (mapf f root)))
 
@@ -547,8 +547,8 @@
 (define (mapi root)
   (define (mapf f tree)
     (match tree
-	   (($ tree 'Empty)   (Empty))
-	   (($ tree 'Tree color a xk x b)  
+	   (($ rb-tree#tree 'Empty)   (Empty))
+	   (($ rb-tree#tree 'Tree color a xk x b)  
 	    (Tree color (mapf f a) xk (f xk x) (mapf f b)))))
   (lambda (f) (mapf f root) ))
 
@@ -568,15 +568,15 @@
 
 (define (next lst)
   (match lst
-	 (((and t ($ tree 'Tree _ _ _ _ b)) . rest)  
+	 (((and t ($ rb-tree#tree 'Tree _ _ _ _ b)) . rest)  
 	  (list t (left b rest)))
 	 
 	 (else (list (Empty) '()))))
 
 (define (left t rest)
   (match t
-	 (($ tree 'Empty) rest)
-	 ((and t ($ tree 'Tree _ a _ _ _)) 
+	 (($ rb-tree#tree 'Empty) rest)
+	 ((and t ($ rb-tree#tree 'Tree _ a _ _ _)) 
 	  (left a (cons t rest)))))
 
 (define (start t) (left t '()))
@@ -628,9 +628,9 @@
   
 (define (map-insert t n result)
   (match t
-	 ((($ tree 'Empty) _)  
+	 ((($ rb-tree#tree 'Empty) _)  
 	  (list n result))
-	 ((($ tree 'Tree _ _ xk x _) r)
+	 ((($ rb-tree#tree 'Tree _ _ xk x _) r)
 	  (map-insert (next r) (+ 1 n) (add-item xk x result)))))
 
 
@@ -644,16 +644,16 @@
       (let recur ((t1 t1) (t2 t2) (n n) (result result))
 	(match (list (next t1) (next t2))
 	       
-	       (((($ tree 'Empty) _) (($ tree 'Empty) _))
+	       (((($ rb-tree#tree 'Empty) _) (($ rb-tree#tree 'Empty) _))
 		(list n result))
 	       
-	       (((($ tree 'Empty) _) t2)
+	       (((($ rb-tree#tree 'Empty) _) t2)
 		(map-insert t2 n result))
 	       
-	       ((t1 (($ tree 'Empty) _))
+	       ((t1 (($ rb-tree#tree 'Empty) _))
 		(map-insert t1 n result))
 	       
-	       (((($ tree 'Tree _ _ xk x _) r1) (($ tree 'Tree _ _ yk y _) r2))
+	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree _ _ yk y _) r2))
 		(let ((xk1 (k1 xk)) (yk1 (k2 yk)))
 
 		  (let ((c (key-compare xk1 yk1)))
@@ -671,16 +671,16 @@
       (let recur ((t1 t1) (t2 t2) (n n) (result result))
 	(match (list (next t1) (next t2))
 	       
-	       (((($ tree 'Empty) _) (($ tree 'Empty) _))
+	       (((($ rb-tree#tree 'Empty) _) (($ rb-tree#tree 'Empty) _))
 		(list n result))
 	       
-	       (((($ tree 'Empty) _) t2)
+	       (((($ rb-tree#tree 'Empty) _) t2)
 		(map-insert t2 n result))
 	       
-	       ((t1 (($ tree 'Empty) _))
+	       ((t1 (($ rb-tree#tree 'Empty) _))
 		(map-insert t1 n result))
 	       
-	       (((($ tree 'Tree _ _ xk x _) r1) (($ tree 'Tree_ _ yk y _) r2))
+	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree_ _ yk y _) r2))
 		(let ((xk1 (k1 xk)) (yk1 (k2 yk)))
 		  (let ((c (key-compare xk1 yk1)))
 		    (cond ((negative? c)   (recur r1 t2 (+ 1 n) (add-item xk1 x result)))
@@ -694,8 +694,8 @@
 (define (get-depth root)
   (let loop ((node root) (level 0))
     (match node 
-           (($ tree 'Empty)  level)
-           (($ tree 'Tree _ a _ _ b)  
+           (($ rb-tree#tree 'Empty)  level)
+           (($ rb-tree#tree 'Tree _ a _ _ b)  
             (max (loop a (+ 1 level))
                  (loop b (+ 1 level)))))))
 
@@ -703,8 +703,8 @@
 (define (get-size root)
   (let loop ((node root))
     (match node 
-           (($ tree 'Empty)  0)
-           (($ tree 'Tree _ a _ _ b)  
+           (($ rb-tree#tree 'Empty) 0)
+           (($ rb-tree#tree 'Tree _ a _ _ b)
             (+ 1 (loop a) (loop b)))
            ))
   )
