@@ -66,7 +66,7 @@ The `<PersistentMap>` typeclass contains the following operations:
 
 ```scheme
 
- (use rb-tree typeclass)
+ (import rb-tree typeclass)
  
  (define (++ x) (fx+ 1 x))
  (define (-- x) (fx- x 1))
@@ -99,7 +99,7 @@ The `<PersistentMap>` typeclass contains the following operations:
 ## License
 
 >
-> Copyright 2007-2015 Ivan Raikov
+> Copyright 2007-2018 Ivan Raikov
 > 
 >  This program is free software: you can redistribute it and/or modify
 >  it under the terms of the GNU General Public License as published by
