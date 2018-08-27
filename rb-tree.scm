@@ -34,19 +34,22 @@
   (
    rb-tree-map 
    union-with union-withi 
-   <PersistentMap> 
-   )
+   persistent-map? get get/default get-min get-max get-value get-value/default
+   put update delete
+   for-each-ascending for-each-descending)
+
 
   (import scheme (chicken base)
           (chicken memory representation)
           (only (chicken string) conc)
-          datatype matchable typeclass)
+          datatype matchable yasos yasos-collections)
   (import-for-syntax srfi-1)
 
 ;;
-;; Persistent map typeclass
+;; Persistent map operations
 ;; 
-;; A persistent map class provides the following operations:
+;; A persistent map class provides the operations provided by yasos-collections,
+;;  plus the following operations:
 ;;
 ;;	get 
 ;;
@@ -72,17 +75,6 @@
 ;;		tree with the largest key. If the tree is empty, an
 ;;		error is signalled.
 ;;
-;;	empty
-;;		returns an empty tree
-;;
-;;	empty?
-;;		returns #t if the tree is empty
-;;
-;;	size
-;;
-;;		returns the size (the number of associations) in the
-;;		tree
-;;
 ;;
 ;;	for-each-ascending
 ;;
@@ -100,29 +92,19 @@
 ;;		The tree must not be empty.
 ;;
 
-(define-class <PersistentMap> 
-  empty
-  empty?
-  size
-  get
-  get-value
-  get-min
-  get-max
-  list-keys
-  list-values
-  put
-  update
-  delete
-  for-each-ascending
-  for-each-descending
-  map mapi
-  fold foldi
-  fold-right foldi-right
-  fold-partial foldi-partial
-  fold-right-partial foldi-right-partial
-  fold-limit
-  fold-right-limit
-  )
+(define-predicate persistent-map?)
+(define-operation (get pmap key))
+(define-operation (get/default pmap key default-clause))
+(define-operation (get-min pmap))
+(define-operation (get-max pmap))
+(define-operation (get-value pmap key))
+(define-operation (get-value/default pmap key default-clause))
+(define-operation (put pmap key value))
+(define-operation (update pmap key value merge-fn))
+(define-operation (delete pmap key))
+(define-operation (for-each-ascending pmap f))
+(define-operation (for-each-descending pmap f))
+
 
 
 ;;
@@ -179,7 +161,6 @@
   (Top) 
   (Left (color color?) (key identity) (value identity) (tree tree?) (zipper zipper?))
   (Right (color color?) (tree tree?) (key identity) (value identity) (zipper zipper?)))
-
 
 
 (define (tree-tag x)
@@ -283,28 +264,26 @@
 ;; Looks for an item: Given a key, returns the corresponding (key
 ;; . value) association or #f if the tree does not contain an
 ;; association with that key.
-(define (find-assoc key-compare root)
-  (lambda (key)
+(define (find-assoc key-compare root key)
     (let recur ((root root))
       (cases tree root 
 	     (Empty ()  #f)
 	     (Tree (c a yk y b)
 		   (dispatch-on-key key-compare 
 				    key yk (recur a) (cons yk y) (recur b)))))
-    ))
+    )
 
 ;; Looks for an item: Given a key, returns the value of the
 ;; corresponding (key . value) association or #f if the tree does
 ;; not contain an association with that key.
-(define (find-ref key-compare root)
-  (lambda (key)
+(define (find-ref key-compare root key)
     (let recur ((root root))
       (cases tree root 
 	     (Empty ()  #f)
 	     (Tree (c a yk y b)
 		   (dispatch-on-key key-compare 
 				    key yk (recur a) y (recur b)))))
-    ))
+    )
 
 ;; Finds an association with a given key, and deletes it.  Returns
 ;; the (key . value) pair of the deleted association, or #f if it
@@ -412,145 +391,23 @@
   (f root))
 
 
-(define (foldv-limit root)
-  (lambda (p f init) 
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a _ x b)  
-	      (if (p ax) ax (foldf b (f x (foldf a ax)))))))
-    (foldf root init)))
 
-
-(define (foldv-right-limit root)
-  (lambda (p f init) 
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a _ x b)  
-	      (if (p ax) ax (foldf a (f x (foldf b ax)))))))
-    (foldf root init)))
-
-
-(define (foldv-partial root)
-  (lambda (p f init) 
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a _ x b)  
-	      (if (p x) (foldf b (f x (foldf a ax))) ax))))
-    (foldf root init)))
-
-
-(define (foldi-partial root)
-  (lambda (p f init) 
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a xk x b)  
-	      (if (p xk x) (foldf b (f xk x (foldf a ax))) ax))))
-    (foldf root init)))
-
-
-(define (foldv-right-partial root )
-  (lambda (p f init) 
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a _ x b)  
-	      (if (p x) (foldf a (f x (foldf b ax))) ax))))
-    (foldf root init)))
-
-
-(define (foldi-right-partial root)
-  (lambda (p f init) 
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a xk x b)  
-	      (if (p xk x) (foldf a (f xk x (foldf b ax))) ax))))
-    (foldf root init)))
-
-
-(define (foldv root)
-  (lambda (f init)
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a _ x b)  (foldf b (f x (foldf a ax))))))
-    (foldf root init)))
-
-
-(define (foldi root)
-  (lambda (f init)
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a xk x b)  (foldf b (f xk x (foldf a ax))))))
-    (foldf root init)))
-
-
-(define (foldv-right root)
-  (lambda (f init)
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a _ x b)  (foldf a (f x (foldf b ax))))))
-    (foldf root init)))
-
-
-(define (foldi-right root)
-  (lambda (f init)
-    (define (foldf tree ax)
-      (match tree
-	     (($ rb-tree#tree 'Empty)  ax)
-	     (($ rb-tree#tree 'Tree _ a xk x b)  (foldf a (f xk x (foldf b ax))))))
-    (foldf root init)))
-
-
-
-;; Returns an ordered list of the keys in the tree
-(define (list-keys foldi-right)
-  (foldi-right (lambda (k x l) (cons k l)) (list)))
-
-
-;; Returns an ordered list of the (key . item) pairs in the tree
-(define (list-items foldi-right)
-  (foldi-right (lambda (k x l) (cons (cons k x) l)) (list)))
-
-
-(define (for-each-ascending root )
+(define (for-each-ascending root f)
   (define (appf f tree)
     (match tree
 	   (($ rb-tree#tree 'Empty)  (void))
 	   (($ rb-tree#tree 'Tree _ a k x b)  (begin (appf f a) (f (cons k x)) (appf f b)))))
-  (lambda (f) (appf f root)))
+  (appf f root))
 
 
-(define (for-each-descending root)
+(define (for-each-descending root f)
   (define (appf f tree)
     (match tree
 	   (($ rb-tree#tree 'Empty)  (void))
 	   (($ rb-tree#tree 'Tree _ a k x b)  (begin (appf f b) (f (cons k x)) (appf f a)))))
-  (lambda (f) (appf f root)))
+  (appf f root))
   
 
-(define (mapv root)
-  (define (mapf f tree)
-    (match tree
-	   (($ rb-tree#tree 'Empty)  (Empty))
-	   (($ rb-tree#tree 'Tree color a xk x b)  
-	    (Tree color (mapf f a) xk (f x) (mapf f b)))))
-  (lambda (f) (mapf f root)))
-
-
-(define (mapi root)
-  (define (mapf f tree)
-    (match tree
-	   (($ rb-tree#tree 'Empty)   (Empty))
-	   (($ rb-tree#tree 'Tree color a xk x b)  
-	    (Tree color (mapf f a) xk (f xk x) (mapf f b)))))
-  (lambda (f) (mapf f root) ))
 
 
 (define (apply-default-clause label key default-clause)
@@ -709,111 +566,111 @@
            ))
   )
 
+(define *eof-object* (read (open-input-string "")))
+(define (eof-object) *eof-object*)
 
-(define (rb-tree-map key-compare #!key (insdel-key-compare key-compare) )
+(define (value-generator root)
+  (let ((s (match (start root)
+                  ((fst . rst)
+                   (make-parameter (list fst rst)))
+                  (else (error 'value-generator "empty root")))))
+    (lambda ()
+      (let* ((sval (s))
+             (t (car sval))
+             (rst (cadr sval)))
+        (s (next rst))
+        (cases tree t
+               (Empty () (eof-object))
+               (Tree (c l k v r) v))
+        ))
+    ))
 
-      (make-<PersistentMap>
+(define (key-generator root)
+  (let ((s (match (start root)
+                  ((fst . rst)
+                   (make-parameter (list fst rst)))
+                  (else (error 'value-generator "empty root")))))
+    (lambda ()
+      (let* ((sval (s))
+             (t (car sval))
+             (rst (cadr sval)))
+        (s (next rst))
+        (cases tree t
+               (Empty () (eof-object))
+               (Tree (c l k v r) k))
+        ))
+    ))
 
-       ;; empty tree
-       (lambda () (Empty))
 
-       ;; empty?
-       (lambda (root)
-         (cases tree root
-                (Empty () #t)
-                (else #f)))
 
-       ;; size
-       (lambda (root) 
-         (get-size root))
+
+(define (rb-tree-map key-compare #!key
+                     (new-root (Empty)))
+  (let ( (root new-root) )
+    (object
+      ;; persistent map behaviors
+      ((persistent-map? self) #t)
+      ((size self) (get-size root))
+      
+      ((empty? self)
+       (cases tree root
+              (Empty () #t)
+              (else #f)))
+      
+       ((get self key)
+        (or (find-assoc key-compare root key)
+            (apply-default-clause 'get key '())))
+	  
+       ((get/default self key default-clause)
+        (or (find-assoc key-compare root key)
+            (apply-default-clause 'get key (list default-clause))))
+	  
+       ((get-value self key)
+         (or (find-ref key-compare root key)
+             (apply-default-clause 'get-value key '())))
        
-       ;; get
-       (lambda (root)
-         (let ((find-assoc1 (find-assoc key-compare root)))
-           (lambda (key . default-clause)
-             (or (find-assoc1 key) 
-                 (apply-default-clause 'get key default-clause)))))
-	  
-       ;; get-value
-       (lambda (root)
-         (let ((find-ref1 (find-ref key-compare root)))
-           (lambda (key . default-clause)
-             (or (find-ref1 key) (apply-default-clause 'get-value key default-clause)))))
-
-       ;; get-min
-       get-min
+       ((get-value/default self key default-clause)
+         (or (find-ref key-compare root key)
+             (apply-default-clause 'get-value key (list default-clause))))
        
-       ;; get-max
-       get-max
-
-       ;; list-keys
-       (lambda (root)
-         (list-keys (foldi-right root)))
-
-       ;; list-items
-       (lambda (root)
-         (list-items (foldi-right root)))
-	  
-       ;; put
-       (lambda (root key value)
-         (let ((new-root (insert insdel-key-compare (lambda (x ax) x) root key value)))
-           new-root))
-	  
-       ;; update
-       (lambda (root key value merge-fn)
-         (let ((new-root (insert insdel-key-compare merge-fn root key value)))
-           new-root))
-	  
-       ;; delete
-       (lambda (root key . default-clause)
-         (or (let ((item+tree  (delete-assoc insdel-key-compare root key)))
-               item+tree) 
-             (apply-default-clause 'delete key default-clause)))
-	  
-       ;; for-each-ascending
-       for-each-ascending
-
-       ;; for-each-descending
-       for-each-descending
-
-       ;; map
-       mapv
-
-       ;; mapi
-       mapi
-
-       ;; fold
-       foldv 
-
-       ;; foldi
-       foldi
-
-       ;; fold-right
-       foldv-right
+       ((get-min self)
+        (get-min root))
        
-       ;; foldi-right
-       foldi-right
+       ((get-max self)
+        (get-max root))
 	  
-       ;; fold-partial
-       foldv-partial
-
-       ;; foldi-partial
-       foldi-partial 
-
-       ;; fold-right-partial
-       foldv-right-partial 
-
-       ;; foldi-right-partial
-       foldi-right-partial 
+       ((put self key value)
+        (let ((new-root (insert key-compare (lambda (x ax) x) root key value)))
+          (rb-tree-map key-compare new-root: new-root)))
 	  
-       ;; fold-limit
-       foldv-limit 
-
-       ;; fold-right-limit
-       foldv-right-limit 
+       ((update self key value merge-fn)
+        (let ((new-root (insert key-compare merge-fn root key value)))
+          (rb-tree-map key-compare new-root: new-root)))
+	  
+       ((delete self key)
+        (or (let* ((item+tree  (delete-assoc key-compare root key))
+                   (item (car item+tree))
+                   (new-root (cdr item+tree)))
+              (cons item (rb-tree-map key-compare new-root: new-root)))
+            (apply-default-clause 'delete key '())))
        
+       ((for-each-ascending self f)
+        (for-each-ascending root f))
+       
+       ((for-each-descending self f)
+        (for-each-descending root f))
+
+       ;; collection behaviors
+       ((collection? self) #t)
+       ((gen-keys self) (key-generator root))
+       ((gen-elts self) (value-generator root))
+       ((for-each-key self proc)
+        (for-each-ascending root (lambda (item) (proc (car item)))))
+       ((for-each-elt self proc)
+        (for-each-ascending root (lambda (item) (proc (cdr item)))))
+        
        ))
-
+  )
 
 
 )

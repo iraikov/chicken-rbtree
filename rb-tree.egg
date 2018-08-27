@@ -3,7 +3,7 @@
 ((synopsis "A sorted dictionary data structure based on red-black trees.")
  (license "GPL-3")
  (category data)
- (dependencies datatype matchable typeclass srfi-1)
+ (dependencies datatype matchable yasos srfi-1)
  (test-dependencies test srfi-1)
  (author "Ivan Raikov")
  (components (extension rb-tree))

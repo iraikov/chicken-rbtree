@@ -3,7 +3,7 @@
 ;; Verifying the rb-tree package
 ;;
 
-(import scheme (chicken base) (chicken format) typeclass srfi-1 rb-tree test)
+(import scheme (chicken base) (chicken format) srfi-1 rb-tree yasos-collections test)
 
 (define (++ x) (+ 1 x))
 (define (-- x) (- x 1))
@@ -23,75 +23,66 @@
   (test-group "the empty and size predicates on an empty map"
 
    (let ((m (new-map)))
-     (with-instance ((<PersistentMap> m))
-       (let ((t (empty)))
-       (test-assert  (empty? t))
-       (test-assert (zero? (size t)))
-       ))
+     (test-assert (empty? m))
+     (test-assert (zero? (size m)))
      ))
 
   (test-group (sprintf "loading a sequence [~A,~A] in ascending order" min-key max-key)
    (let ((m (new-map)))
-     (with-instance ((<PersistentMap> m))
-      (let ((t 
+      (let ((m1
              (time
-              (let recur  ((t (empty)) (i min-key))
-                (let ((t1 (put t i (cdr (compute-assoc i)))))
-                  (test (sprintf "get element ~A" i) (compute-assoc i) ((get t1) i))
-                  (if (< i max-key) (recur t1 (++ i)) t1))))))
+              (let recur  ((m m) (i min-key))
+                (let ((m1 (put m i (cdr (compute-assoc i)))))
+                  (test (sprintf "get element ~A" i) (compute-assoc i) (get m1 i))
+                  (if (< i max-key) (recur m1 (++ i)) m1))))))
             
-         (test (++ (- max-key min-key)) (size t))
-         (test-assert (not (empty? t)))
+         (test (++ (- max-key min-key)) (size m1))
+         (test-assert (not (empty? m1)))
          
-         (let ((gett (get t)))
-           (test (compute-assoc (++ min-key)) (gett (++ min-key)))
-           (test (compute-assoc (++ min-key)) (gett (++ min-key) #f))
+         (test (compute-assoc (++ min-key)) (get m1 (++ min-key)))
+         (test (compute-assoc (++ min-key)) (get/default m1 (++ min-key) #f))
          
-           (test-assert "looking up of non-existing keys" 
-                        (not (gett (-- min-key) #f)))
-           )
+         (test-assert "looking up of non-existing keys" 
+                      (not (get/default m1 (-- min-key) #f)))
        ))
-     ))
+     )
 
   (test-group "reloading the same sequence in descending order and then deleting" 
 	      
    (let ((m (new-map)))
-     (with-instance ((<PersistentMap> m))
-      (let ((t 
+      (let ((m1 
              (time
-              (let recur  ((t (empty)) (i max-key))
-                (let ((t1 (put t i (cdr (compute-assoc i)))))
-                  (test (sprintf "get element ~A" i) (compute-assoc i) ((get t1) i))
-                  (let ((t2 (delete t1 i)))
-                    (if (< min-key i) (recur (cdr t2) (- i 1)) (cdr t2)))))))
+              (let recur  ((m m) (i max-key))
+                (let ((m1 (put m i (cdr (compute-assoc i)))))
+                  (test (sprintf "get element ~A" i) (compute-assoc i) (get m1 i))
+                  (let ((m2 (delete m1 i)))
+                    (if (< min-key i) (recur (cdr m2) (- i 1)) (cdr m2)))))))
             )
 
-        (test-assert (zero? (size t))))
+        (test-assert (zero? (size m1))))
       ))
-   )
 
-  (test-group "fold and map"
-   (let ((m (new-map)))
-     (with-instance ((<PersistentMap> m))
-      (let ((t
-             (let recur  ((t (empty)) (i min-key))
-                   (let ((t1 (put t i (cdr (compute-assoc i)))))
-                     (if (< i max-key) (recur t1 (++ i)) t1)))))
+  (test-group "reduce and map"
+    (let ((m
+           (let recur  ((m (new-map)) (i min-key))
+             (let ((m1 (put m i (cdr (compute-assoc i)))))
+               (if (< i max-key) (recur m1 (++ i)) m1)))))
 
-	(test "using fold to sum the elements in the persistent-map"  
+	(test "using reduce to sum the elements in the persistent-map"  
               (* 5000 (+ (+ 1 min-key) (+ 1 max-key)))
-              ((fold t) (lambda (x sum) (+ x sum)) 0))
+              (reduce (lambda (x sum) (+ x sum)) 0 m))
 
          (test-group "using map to multiply each elements by 10"
                      (let (
-                           (t-x10 ((map t) (lambda (x) (* x 10))))
+                           (m-x10 (map-elts (lambda (x) (* x 10)) m))
                            (compute-assoc-x10 (lambda (key) (cons key (* 10 (++ key)))))
                            )
-                         (do ((i min-key (++ i))) ((> i max-key))
+                       (print m-x10)
+                         (do ((i min-key (++ i))) ((>= i max-key))
                            (test (sprintf "element ~A" i)
-                                 (compute-assoc-x10 i) 
-                                 ((get t-x10) i) ))))))
-       ))
+                                 (cdr (compute-assoc-x10 i))
+                                 (elt-ref m-x10 (-- i) ))))))
+       )
    )
 
 (test-exit)
