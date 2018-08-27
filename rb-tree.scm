@@ -35,7 +35,7 @@
    rb-tree-map 
    union-with union-withi 
    persistent-map? get get/default get-min get-max get-value get-value/default
-   put update delete
+   put generate update delete
    for-each-ascending for-each-descending)
 
 
@@ -99,6 +99,7 @@
 (define-operation (get-max pmap))
 (define-operation (get-value pmap key))
 (define-operation (get-value/default pmap key default-clause))
+(define-operation (generate pmap p f g seed))
 (define-operation (put pmap key value))
 (define-operation (update pmap key value merge-fn))
 (define-operation (delete pmap key))
@@ -121,10 +122,9 @@
 ;;
 ;;
 ;; The red-black tree object is created by procedure 
-;; rb-tree-ephemeral-map / rb-tree-persistent-map 
+;; rb-tree-map 
 ;;
 ;;  rb-tree-tree-persistent-map :: KEY-COMPARE-PROC -> PERSISTENT-MAP
-;;  rb-tree-tree-ephemeral-map :: KEY-COMPARE-PROC -> EPHEMERAL-MAP
 ;; 
 ;;  where KEY-COMPARE-PROC is a user-supplied function
 ;;
@@ -638,6 +638,14 @@
        
        ((get-max self)
         (get-max root))
+	  
+       ((generate self p f g seed)
+        (let recur ((new-root root) (seed seed))
+          (if (p seed)
+              (rb-tree-map key-compare new-root: new-root)
+              (let* ((item (f seed))
+                     (new-root (insert key-compare (lambda (x ax) x) new-root (car item) (cdr item))))
+                (recur new-root (g seed))))))
 	  
        ((put self key value)
         (let ((new-root (insert key-compare (lambda (x ax) x) root key value)))

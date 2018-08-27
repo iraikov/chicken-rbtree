@@ -47,6 +47,23 @@
        ))
      )
 
+  (test-group (sprintf "generating a sequence [~A,~A]" min-key max-key)
+   (let ((m (new-map)))
+      (let ((m1
+             (time
+              (generate m (lambda (x) (> x max-key))
+                        (lambda (x) (compute-assoc x))
+                        (lambda (x) (++ x))
+                        min-key))))
+            
+         (test (++ (- max-key min-key)) (size m1))
+         (test-assert (not (empty? m1)))
+         
+         (test (compute-assoc (++ min-key)) (get m1 (++ min-key)))
+         (test (compute-assoc (++ min-key)) (get/default m1 (++ min-key) #f))
+       ))
+     )
+
   (test-group "reloading the same sequence in descending order and then deleting" 
 	      
    (let ((m (new-map)))
