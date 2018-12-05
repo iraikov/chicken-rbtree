@@ -569,35 +569,48 @@
 (define *eof-object* (read (open-input-string "")))
 (define (eof-object) *eof-object*)
 
+(define-record-type <root>
+  (make-root val)
+  root?
+  (val root-val root-val-set!))
+
+
 (define (value-generator root)
-  (let ((s (match (start root)
-                  ((fst . rst)
-                   (make-parameter (list fst rst)))
-                  (else (error 'value-generator "empty root")))))
+  (let ((s (make-root
+            (match (start root)
+                   ((fst . rst) 
+                    (cons fst rst))
+                   (else '())))))
     (lambda ()
-      (let* ((sval (s))
-             (t (car sval))
-             (rst (cadr sval)))
-        (s (next rst))
-        (cases tree t
-               (Empty () (eof-object))
-               (Tree (c l k v r) v))
+      (let ((sval (root-val s)))
+        (if (null? sval)
+            (eof-object)
+            (match-let (((t sval-next) (next sval)))
+                       (root-val-set! s sval-next)
+                       (cases tree t
+                              (Empty () (eof-object))
+                              (Tree (c l k v r) v))
+                       ))
         ))
     ))
 
+
 (define (key-generator root)
-  (let ((s (match (start root)
-                  ((fst . rst)
-                   (make-parameter (list fst rst)))
-                  (else (error 'value-generator "empty root")))))
+  (let ((s (make-root
+            (match (start root)
+                   ((fst . rst)
+                    (cons fst rst))
+                   (else '())))))
     (lambda ()
-      (let* ((sval (s))
-             (t (car sval))
-             (rst (cadr sval)))
-        (s (next rst))
-        (cases tree t
-               (Empty () (eof-object))
-               (Tree (c l k v r) k))
+      (let ((sval (root-val s)))
+        (if (null? sval)
+            (eof-object)
+            (match-let (((t sval-next) (next sval)))
+                       (root-val-set! s sval-next)
+                       (cases tree t
+                              (Empty () (eof-object))
+                              (Tree (c l k v r) k))
+                       ))
         ))
     ))
 
