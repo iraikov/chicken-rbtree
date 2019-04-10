@@ -12,7 +12,7 @@
 ;; Some helper code was borrowed from treap.scm by Oleg Kiselyov.
 ;;
 ;;
-;; Copyright 2007-2018 Ivan Raikov.
+;; Copyright 2007-2019 Ivan Raikov.
 ;;
 ;;
 ;; This program is free software: you can redistribute it and/or
@@ -33,7 +33,7 @@
 	
   (
    rb-tree-map 
-   union-with union-withi 
+   union-with union-withi union-transform
    persistent-map? get get/default get-min get-max get-value get-value/default
    put generate update delete
    for-each-ascending for-each-descending)
@@ -546,6 +546,60 @@
 	       
 	       ))))
     (wrap union))
+
+	   
+(define (wrap-transform f)
+  (lambda (t1 t2)
+    (match-let (((n result kt1 kt2) (f (start t1) (start t2) 0 (Zero) '() '())))
+               (list n (link-all result) kt1 kt2))))
+
+  
+(define (map-transform f t n result kt)
+  (match t
+	 ((($ rb-tree#tree 'Empty) _)  
+	  (list n result kt))
+	 ((($ rb-tree#tree 'Tree _ _ xk x _) r)
+          (let ((x1 (f x)))
+            (map-transform f (next r) (+ 1 n) (add-item xk x1 result) (cons (cons xk x1) kt))))
+         ))
+
+
+(define (union-transform fn merge-fn)
+  (define (union kt1 kt2 key-compare)
+    (lambda (t1 t2 n result)
+      (let recur ((t1 t1) (t2 t2) (n n) (result result) (kt1 kt1) (kt2 kt2))
+	(match (list (next t1) (next t2))
+	       
+	       (((($ rb-tree#tree 'Empty) _) (($ rb-tree#tree 'Empty) _))
+		(list n result kt1 kt2))
+	       
+	       (((($ rb-tree#tree 'Empty) _) t2)
+		(match-let (((n result kt2) (map-transform fn t2 n result kt2)))
+                           (list n result kt1 kt2)))
+	       
+	       ((t1 (($ rb-tree#tree 'Empty) _))
+		(match-let (((n result kt1) (map-transform fn t1 n result kt1)))
+                           (list result kt1 kt2)))
+	       
+	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree _ _ yk y _) r2))
+		(let ((xk1 (kt1 xk)) (yk1 (kt2 yk)))
+
+		  (let ((c (key-compare xk1 yk1)))
+		    (cond ((negative? c)
+                           (let ((x1 (fn x)))
+                             (recur r1 t2 (+ 1 n) (add-item xk1 x1 result) (cons (cons xk1 x1) kt1) kt2)))
+			  ((zero? c)
+                           (let ((x1 (merge-fn x y)))
+                             (recur r1 r2 (+ 1 n) (add-item xk1 x1 result) (cons (cons xk1 x1) kt1) kt2)))
+			  ((positive? c)
+                           (let ((y1 (fn y)))
+                             (recur t1 r2 (+ 1 n) (add-item yk1 y1 result) kt1 (cons (cons yk1 y1) kt2))))
+                          ))
+                  ))
+		
+	       ))
+      ))
+  (wrap-transform union))
 
 
 (define (get-depth root)
