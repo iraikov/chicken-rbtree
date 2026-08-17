@@ -40,6 +40,7 @@
 
 
   (import scheme (chicken base)
+          (scheme base)
           (chicken memory representation)
           (only (chicken string) conc)
           datatype matchable yasos yasos-collections)
@@ -169,16 +170,17 @@
 	 (Tree (c l k v r) 'Tree)))
 
 
-(define-record-printer (tree x out)
-  (cases tree x 
-	 (Empty () (display "#(Empty)" out))
-	 (Tree (c l k v r)
-	       (display "#(Tree " out)
-	       (display (conc c " ") out) 
-	       (display (tree-tag l) out)
-	       (display (conc " " k ":" v " ") out)
-	       (display (tree-tag r) out)
-	       (display ")" out))))
+(set-record-printer! 'rb-tree#tree
+  (lambda (x out)
+    (cases tree x
+	   (Empty () (display "#(Empty)" out))
+	   (Tree (c l k v r)
+		 (display "#(Tree " out)
+		 (display (conc c " ") out)
+		 (display (tree-tag l) out)
+		 (display (conc " " k ":" v " ") out)
+		 (display (tree-tag r) out)
+		 (display ")" out)))))
 
 
 ;;
@@ -537,7 +539,7 @@
 	       ((t1 (($ rb-tree#tree 'Empty) _))
 		(map-insert t1 n result))
 	       
-	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree_ _ yk y _) r2))
+	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree _ _ yk y _) r2))
 		(let ((xk1 (k1 xk)) (yk1 (k2 yk)))
 		  (let ((c (key-compare xk1 yk1)))
 		    (cond ((negative? c)   (recur r1 t2 (+ 1 n) (add-item xk1 x result)))
@@ -619,9 +621,6 @@
             (+ 1 (loop a) (loop b)))
            ))
   )
-
-(define *eof-object* (read (open-input-string "")))
-(define (eof-object) *eof-object*)
 
 (define-record-type <root>
   (make-root val)

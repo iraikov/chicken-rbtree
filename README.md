@@ -4,7 +4,9 @@ Sorted dictionary data structures based on red-black trees.
 
 ## Usage
 
+```scheme
 (import rb-tree)
+```
 
 ## Documentation
 
@@ -24,7 +26,9 @@ is `O(log n)` where `n` is the total number of keys in the tree.
 
 The persistent map instance is created by procedure `rb-tree-map`:
 
-<procedure>rb-tree-map:: KEY-COMPARE-PROC -> persistent-map</procedure>
+```
+rb-tree-map :: KEY-COMPARE-PROC -> persistent-map
+```
 
 where KEY-COMPARE-PROC is a user-supplied function that takes two keys
 and returns a negative, positive, or zero number depending on how the
@@ -33,13 +37,13 @@ first key compares to the second.
 `persistent-map` is a yasos class that contains the following operations:
 
 * `empty? TREE` : returns `#t` if the given tree is empty
-* `get TREE` : returns a procedure of the form `(LAMBDA KEY . DEFAULT-CLAUSE` which searches the given tree for an association with a given `KEY`, and returns a (key . value) pair of the found association. If an association with `KEY` cannot be located in the  tree, the procedure returns the result of evaluating the `DEFAULT-CLAUSE`. If the default clause is omitted, an error is signalled. `KEY` must be comparable to the keys in the  tree by a key-compare predicate (which has been specified when the  tree was created)
-* `get-value TREE` : returns a procedure of the form `(LAMBDA KEY . DEFAULT-CLAUSE` which searches the tree for an association with a given `KEY`, and returns the value of (key . value) pair of the found association. If an association with `KEY` cannot be located in the  tree, the procedure returns the result of evaluating the `DEFAULT-CLAUSE`. If the default clause is omitted, an error is signalled. `KEY` must be comparable to the keys in the  tree by a key-compare predicate (which has been specified when the  tree was created)
-* `get-min TREE` : returns a (key . value) pair for an association in the tree with the smallest key. If the  tree is empty, an error is signalled.
+* `get TREE` : returns a procedure of the form `(LAMBDA KEY . DEFAULT-CLAUSE` which searches the given tree for an association with a given `KEY`, and returns a (key . value) pair of the found association. If an association with `KEY` cannot be located in the tree, the procedure returns the result of evaluating the `DEFAULT-CLAUSE`. If the default clause is omitted, an error is signalled. `KEY` must be comparable to the keys in the tree by a key-compare predicate (which has been specified when the tree was created)
+* `get-value TREE` : returns a procedure of the form `(LAMBDA KEY . DEFAULT-CLAUSE` which searches the tree for an association with a given `KEY`, and returns the value of (key . value) pair of the found association. If an association with `KEY` cannot be located in the tree, the procedure returns the result of evaluating the `DEFAULT-CLAUSE`. If the default clause is omitted, an error is signalled. `KEY` must be comparable to the keys in the tree by a key-compare predicate (which has been specified when the tree was created)
+* `get-min TREE` : returns a (key . value) pair for an association in the tree with the smallest key. If the tree is empty, an error is signalled.
 * `get-max TREE` : returns a (key . value) pair for an association in the tree with the largest key. If the tree is empty, an error is signalled.
 * `size TREE` : returns the size (the number of associations) in the tree
 * `put TREE KEY VALUE` : returns a new tree object that contains the given association; if the key was already in the tree, the association will be replaced. 
-* `update TREE KEY VALUE MERGE-FN` : returns a new  tree object that contains the given association; if the key was already in the tree, procedure `MERGE-FN` is used to merge the old and new values.
+* `update TREE KEY VALUE MERGE-FN` : returns a new tree object that contains the given association; if the key was already in the tree, procedure `MERGE-FN` is used to merge the old and new values.
 * `delete TREE KEY . DEFAULT-CLAUSE` : if the specified key is found, it returns a new tree object that no longer contains the association specified by that key, while the original tree object is unmodified. If the key is not found, the procedure returns the result of evaluating `DEFAULT-CLAUSE`
 * `for-each-ascending TREE` : returns a procedure `LAMBDA PROC` that will apply the given procedure PROC to each (key . value) association of the tree, from the one with the smallest key all the way to the one with the max key, in an ascending order of keys. 
 * `for-each-descending TREE` : returns a procedure `LAMBDA PROC` that will apply the given procedure `PROC`to each (key . value) association of the tree, in the descending order of keys. 
