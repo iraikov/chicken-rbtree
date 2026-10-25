@@ -36,7 +36,9 @@
    union-with union-withi union-transform
    persistent-map? get get/default get-min get-max get-value get-value/default
    put generate update delete
-   for-each-ascending for-each-descending)
+   for-each-ascending for-each-descending
+   for-each-range gen-range
+   map-key-compare rb-tree-map-valid?)
 
 
   (import scheme (chicken base)
@@ -67,14 +69,12 @@
 ;;	get-min
 ;;
 ;;		returns a (key . value) pair for an association in the
-;;		tree with the smallest key. If the tree is empty,
-;;		an error is signalled.
+;;		tree with the smallest key, or #f if the tree is empty.
 ;;
 ;;	get-max
 ;;
 ;;		returns a (key . value) pair for an association in the
-;;		tree with the largest key. If the tree is empty, an
-;;		error is signalled.
+;;		tree with the largest key, or #f if the tree is empty.
 ;;
 ;;
 ;;	for-each-ascending
@@ -83,14 +83,35 @@
 ;;		procedure PROC to each (key . value) association of
 ;;		the tree, from the one with the smallest key all the
 ;;		way to the one with the max key, in an ascending order
-;;		of keys.  The tree must not be empty.
+;;		of keys.
 ;;
 ;;	for-each-descending
 ;;
 ;;		a procedure LAMBDA PROC that will apply the given
 ;;		procedure PROC to each (key . value) association of
 ;;		the tree, in the descending order of keys.
-;;		The tree must not be empty.
+;;
+;;	for-each-range
+;;
+;;		a procedure LAMBDA LO HI PROC that applies PROC to each
+;;		(key . value) association whose key lies in the
+;;		half-open interval [LO, HI), in ascending order of
+;;		keys.  LO or HI may be #f, meaning that end of the
+;;		interval is open.  Finding the first association takes
+;;		time proportional to the height of the tree.
+;;
+;;	gen-range
+;;
+;;		a procedure LAMBDA LO HI that returns a generator of
+;;		the (key . value) associations whose keys lie in
+;;		[LO, HI), in ascending order of keys.  The generator
+;;		returns an end-of-file object when the range is
+;;		exhausted.
+;;
+;;	map-key-compare
+;;
+;;		returns the key-compare procedure the map was
+;;		created with.
 ;;
 
 (define-predicate persistent-map?)
@@ -106,6 +127,10 @@
 (define-operation (delete pmap key))
 (define-operation (for-each-ascending pmap f))
 (define-operation (for-each-descending pmap f))
+(define-operation (for-each-range pmap lo hi f))
+(define-operation (gen-range pmap lo hi))
+(define-operation (map-root pmap))
+(define-operation (map-key-compare pmap))
 
 
 
@@ -306,7 +331,10 @@
   (define (bbZip zipper tree)
     (match (cons zipper tree)
 	   ((($ rb-tree#zipper 'Top) . a)  (cons #t a))
-	   ;; case 1L 
+	   ;; a red replacement node covers the deficit by turning black
+	   ((z . ($ rb-tree#tree 'Tree 'Red a xk x b))
+	    (cons #f (zip z (Tree B a xk x b))))
+	   ;; case 1L
 	   ((($ rb-tree#zipper 'Left 'Black xk x ($ rb-tree#tree 'Tree 'Red c yk y d) z) . a)
 	    (bbZip (Left R xk x c (Left B yk y d z)) a))
 	   ;; case 3L 
@@ -324,12 +352,12 @@
 	   ;; case 1R 
 	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Red c yk y d) xk x z) . b) 
 	    (bbZip (Right R d xk x (Right B c yk y z)) b))
-	   ;; case 3R 
-	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Tree 'Red c wk w d) yk y e) xk x z) . b) 
-	    (bbZip (Right color (Tree B c wk w (Tree R d yk y e)) xk x z) b))
+	   ;; case 3R
+	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black c yk y ($ rb-tree#tree 'Tree 'Red d wk w e)) xk x z) . b)
+	    (bbZip (Right color (Tree B (Tree R c yk y d) wk w e) xk x z) b))
 	   ;; case 4R
-	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black c yk y ($ rb-tree#tree 'Tree 'Red d wk w e)) xk x z) . b) 
-	    (cons #f (zip z (Tree color c yk y (Tree B (Tree R d wk w e) xk x b)))))
+	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Tree 'Red c wk w d) yk y e) xk x z) . b)
+	    (cons #f (zip z (Tree color (Tree B c wk w d) yk y (Tree B e xk x b)))))
 	   ;; case 2R 
 	   ((($ rb-tree#zipper 'Right 'Red ($ rb-tree#tree 'Tree 'Black c yk y d) xk x z) . b) 
 	    (cons #f (zip z (Tree B (Tree R c yk y d) xk x b))))
@@ -342,7 +370,7 @@
     (match tree
 	   (($ rb-tree#tree 'Tree 'Red ($ rb-tree#tree 'Empty) yk y b) 
 	    (values yk y (cons #f (zip z b))))
-	   (($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree Empty) yk y b) 
+	   (($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Empty) yk y b)
 	    (values yk y (bbZip z b)))
 	   (($ rb-tree#tree 'Tree color a yk y b) 
 	    (delMin a (Left color yk y b z)))
@@ -359,7 +387,8 @@
      ((color a b z)
       (let-values (((xk x b)  (delMin b (Top))))
         (match b
-               ((#t . b1)  (cdr  (bbZip z (Tree color a xk x b1))))
+               ;; the deficit is in the new right subtree b1
+               ((#t . b1)  (cdr  (bbZip (Right color a xk x z) b1)))
                ((#f . b1)  (zip z (Tree color a xk x b1))))))))
   
   (define (del tree key z)
@@ -375,43 +404,99 @@
   (del root key (Top)))
 
 
-(define (get-min root)
-  (define (f root)
-    (match root
-	   (($ rb-tree#tree 'Empty)  #f)
-	   (($ rb-tree#tree 'Tree _ _ ($ rb-tree#tree 'Empty) xk x _)  (cons xk x))
-	   (($ rb-tree#tree 'Tree _ a _ _ _)   (f a))))
-  (f root))
+;; The tree-level helpers below have names distinct from the
+;; operations get-min, get-max, for-each-ascending and
+;; for-each-descending, so that they do not shadow those operations.
+
+(define (tree-min root)
+  (let recur ((root root))
+    (cases tree root
+	   (Empty () #f)
+	   (Tree (c a xk x b)
+		 (cases tree a
+			(Empty () (cons xk x))
+			(Tree (c1 a1 xk1 x1 b1) (recur a)))))))
 
 
-(define (get-max root)
-  (define (f root)
-    (match root
-	   (($ rb-tree#tree 'Empty)  #f)
-	   (($ rb-tree#tree 'Tree _ _ xk x ($ rb-tree#tree 'Empty))  (cons xk x))
-	   (($ rb-tree#tree 'Tree _ _ _ _ b)   (f b))))
-  (f root))
+(define (tree-max root)
+  (let recur ((root root))
+    (cases tree root
+	   (Empty () #f)
+	   (Tree (c a xk x b)
+		 (cases tree b
+			(Empty () (cons xk x))
+			(Tree (c1 a1 xk1 x1 b1) (recur b)))))))
 
 
-
-(define (for-each-ascending root f)
-  (define (appf f tree)
-    (match tree
-	   (($ rb-tree#tree 'Empty)  (void))
-	   (($ rb-tree#tree 'Tree _ a k x b)  (begin (appf f a) (f (cons k x)) (appf f b)))))
-  (appf f root))
+(define (tree-for-each-ascending root f)
+  (let appf ((t root))
+    (cases tree t
+	   (Empty () (void))
+	   (Tree (c a k x b) (appf a) (f (cons k x)) (appf b)))))
 
 
-(define (for-each-descending root f)
-  (define (appf f tree)
-    (match tree
-	   (($ rb-tree#tree 'Empty)  (void))
-	   (($ rb-tree#tree 'Tree _ a k x b)  (begin (appf f b) (f (cons k x)) (appf f a)))))
-  (appf f root))
+(define (tree-for-each-descending root f)
+  (let appf ((t root))
+    (cases tree t
+	   (Empty () (void))
+	   (Tree (c a k x b) (appf b) (f (cons k x)) (appf a)))))
+
+
+;; Range traversal over the half-open key interval [lo, hi).  Either
+;; bound may be #f, meaning that end of the range is open.  The
+;; traversal keeps a stack of nodes whose left subtrees have already
+;; been visited; range-start builds the initial stack by descending
+;; from the root towards lo, which takes time proportional to the
+;; height of the tree.
+
+(define (range-start key-compare root lo)
+  (let descend ((t root) (stack '()))
+    (cases tree t
+	   (Empty () stack)
+	   (Tree (c a k x b)
+		 (if (and lo (negative? (key-compare k lo)))
+		     (descend b stack)
+		     (descend a (cons t stack)))))))
+
+
+(define (range-push-left t stack)
+  (cases tree t
+	 (Empty () stack)
+	 (Tree (c a k x b) (range-push-left a (cons t stack)))))
+
+
+(define (in-range? key-compare hi k)
+  (or (not hi) (negative? (key-compare k hi))))
+
+
+(define (tree-for-each-range key-compare root lo hi f)
+  (let loop ((stack (range-start key-compare root lo)))
+    (if (pair? stack)
+	(cases tree (car stack)
+	       (Empty () (void))
+	       (Tree (c a k x b)
+		     (when (in-range? key-compare hi k)
+		       (f (cons k x))
+		       (loop (range-push-left b (cdr stack)))))))))
+
+
+(define (range-generator key-compare root lo hi)
+  (let ((s (make-root (range-start key-compare root lo))))
+    (lambda ()
+      (let ((stack (root-val s)))
+	(if (null? stack)
+	    (eof-object)
+	    (cases tree (car stack)
+		   (Empty () (eof-object))
+		   (Tree (c a k x b)
+			 (if (in-range? key-compare hi k)
+			     (begin
+			       (root-val-set! s (range-push-left b (cdr stack)))
+			       (cons k x))
+			     (begin
+			       (root-val-set! s '())
+			       (eof-object))))))))))
   
-
-
-
 (define (apply-default-clause label key default-clause)
   (cond
    ((null? default-clause)
@@ -443,8 +528,11 @@
 
 ;; Support for constructing red-black trees in linear time from
 ;; increasing ordered sequences (based on a description by R. Hinze).
-;; Note that the elements in the digits are ordered with the largest
-;; on the left, whereas the elements of the trees are ordered with the
+;; The digits form a number in the bijective base-2 system: each digit
+;; is One or Two, and Zero only marks the end of the list.  The trees
+;; held by the digit at position i all have black height i.  Note that
+;; the elements in the digits are ordered with the largest on the
+;; left, whereas the elements of the trees are ordered with the
 ;; largest on the right.
 
 (define-datatype digit digit?
@@ -454,154 +542,175 @@
        (key2 identity) (value2 identity) (tree2 tree?) (digit digit?)))
 
 
-;; add an item that is guaranteed to be larger than any in l 
+;; Adds an item whose key is guaranteed to be larger than any key in
+;; the digit list l.  A carry out of a Two digit joins its two trees
+;; and its smaller item into one black node of the next black height.
 (define (add-item ak a l)
-  (define (incr ak1 a1 t1 d)
-    (match d
-	   (($ digit 'Zero)
-	    (One ak1 a1 t1 (Zero)))
-	   (($ digit 'One ak2 a2 t2 r)
-	    (Two ak1 a1 t1 ak2 a2 t2 r))
-	   (($ digit 'Two ak2 a2 t2 ak3 a3 t3 r)
-	    (One ak1 a1 t1 (incr ak2 a2 (Tree B t3 ak3 a3 t2) r)))))
+  (define (incr k1 a1 t1 d)
+    (cases digit d
+	   (Zero () (One k1 a1 t1 (Zero)))
+	   (One (k2 a2 t2 r) (Two k1 a1 t1 k2 a2 t2 r))
+	   (Two (k2 a2 t2 k3 a3 t3 r)
+		(One k1 a1 t1 (incr k2 a2 (Tree B t3 k3 a3 t2) r)))))
   (incr ak a (Empty) l))
 
 
-;; link the digits into a tree 
-(define (link-all t)
-  (define (link t d)
-    (match d
-	   (($ digit 'Zero)  t)
-	   (($ digit 'One ak a t2 r) 
-	    (link (Tree B t2 ak a t) r))
-	   (($ digit 'Two ak1 a1 t1 ak2 a2 t2 r)
-	    (link (Tree B (Tree R t2 ak2 a2 t1) ak1 a1 t) r))))
-  (link (Empty) t))
-	    
-	   
-(define (wrap f)
-  (lambda (t1 t2)
-    (match-let (((n result) (f (start t1) (start t2) 0 (Zero))))
-               (link-all result))))
-
-  
-(define (map-insert t n result)
-  (match t
-	 ((($ rb-tree#tree 'Empty) _)  
-	  (list n result))
-	 ((($ rb-tree#tree 'Tree _ _ xk x _) r)
-	  (map-insert (next r) (+ 1 n) (add-item xk x result)))))
+;; Links the digits into a tree.  The tree t accumulated so far holds
+;; the items larger than those of digit d, and has the black height
+;; of the trees in d.  A One digit becomes a black node; a Two digit
+;; becomes a black node with a red left child.  Both raise the black
+;; height by one, so the result satisfies both invariants.
+(define (link-all d)
+  (let link ((t (Empty)) (d d))
+    (cases digit d
+	   (Zero () t)
+	   (One (k a t1 r)
+		(link (Tree B t1 k a t) r))
+	   (Two (k1 a1 t1 k2 a2 t2 r)
+		(link (Tree B (Tree R t2 k2 a2 t1) k1 a1 t) r)))))
 
 
-;; Creates a map whose domain is the union of the domains of the two
-;; input maps, using the supplied function to define the map on
-;; elements that are in both domains.
+;; Returns the associations of the tree as a list of (key . value)
+;; pairs in ascending order of keys.
+(define (tree->list root)
+  (let recur ((t root) (acc '()))
+    (cases tree t
+	   (Empty () acc)
+	   (Tree (c a k x b) (recur a (cons (cons k x) (recur b acc)))))))
+
+
+;; Folds over the union of two ascending association lists in
+;; ascending order of keys.  Each key is passed to exactly one of
+;; ON-LEFT (key value acc), for keys only in XS, ON-RIGHT (key value
+;; acc), for keys only in YS, or ON-BOTH (key x y acc), for keys in
+;; both lists.  The key passed to ON-BOTH is the one from XS.
+(define (fold-union key-compare on-left on-right on-both xs ys acc)
+  (let recur ((xs xs) (ys ys) (acc acc))
+    (match (cons xs ys)
+	   ((() . ()) acc)
+	   ((((xk . x) . xs1) . ())
+	    (recur xs1 ys (on-left xk x acc)))
+	   ((() . ((yk . y) . ys1))
+	    (recur xs ys1 (on-right yk y acc)))
+	   ((((xk . x) . xs1) . ((yk . y) . ys1))
+	    (let ((c (key-compare xk yk)))
+	      (cond ((negative? c) (recur xs1 ys (on-left xk x acc)))
+		    ((positive? c) (recur xs ys1 (on-right yk y acc)))
+		    (else          (recur xs1 ys1 (on-both xk x y acc)))))))))
+
+
+;; Merges the trees of two maps in linear time.  Every procedure
+;; returns the value to store in the result for its key; the
+;; associations are then linked into a new tree.  Returns the key
+;; compare procedure of M1 and the new tree.
+(define (union-trees m1 m2 on-left on-right on-both)
+  (let ((key-compare (map-key-compare m1)))
+    (values key-compare
+	    (link-all
+	     (fold-union key-compare
+			 (lambda (k x d) (add-item k (on-left k x) d))
+			 (lambda (k y d) (add-item k (on-right k y) d))
+			 (lambda (k x y d) (add-item k (on-both k x y) d))
+			 (tree->list (map-root m1))
+			 (tree->list (map-root m2))
+			 (Zero))))))
+
+
+;; Unions of maps.  Each union takes two maps M1 and M2, created by
+;; rb-tree-map with key-compare procedures that order keys the same
+;; way, and returns a new map whose domain is the union of their
+;; domains.  The new map uses the key-compare procedure of M1.  The
+;; inputs are not modified.  A union takes time linear in the sum of
+;; the sizes of the two maps.
+;;
+;;  ((union-with MERGE-FN) M1 M2)
+;;
+;;	MERGE-FN :: x y -> value defines the value of a key that is
+;;	in both maps, where x is its value in M1 and y its value in M2.
+;;
+;;  ((union-withi MERGE-FN) M1 M2)
+;;
+;;	as union-with, but MERGE-FN :: key x y -> value also receives
+;;	the key.
+;;
+;;  ((union-transform FN MERGE-FN) M1 M2)
+;;
+;;	maps the value of every key in only one map through FN :: x ->
+;;	value, and the value of every key in both maps through
+;;	MERGE-FN :: x y -> value.  FN and MERGE-FN are called in
+;;	ascending order of keys.  Returns a list (N M KT1 KT2), where
+;;	N is the number of keys in the new map M, KT1 is a list of (x
+;;	. value) pairs that relates each value x in M1 to its new value
+;;	in M, and KT2 is the corresponding list for M2.  A key in both
+;;	maps contributes a pair to both KT1 and KT2.  Both lists are in
+;;	ascending order of keys.
 
 (define (union-with merge-fn)
-  (define (union k1 k2 key-compare)
-    (lambda (t1 t2 n result)
-      (let recur ((t1 t1) (t2 t2) (n n) (result result))
-	(match (list (next t1) (next t2))
-	       
-	       (((($ rb-tree#tree 'Empty) _) (($ rb-tree#tree 'Empty) _))
-		(list n result))
-	       
-	       (((($ rb-tree#tree 'Empty) _) t2)
-		(map-insert t2 n result))
-	       
-	       ((t1 (($ rb-tree#tree 'Empty) _))
-		(map-insert t1 n result))
-	       
-	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree _ _ yk y _) r2))
-		(let ((xk1 (k1 xk)) (yk1 (k2 yk)))
-
-		  (let ((c (key-compare xk1 yk1)))
-		    (cond ((negative? c)   (recur r1 t2 (+ 1 n) (add-item xk1 x result)))
-			  ((zero? c)       (recur r1 r2 (+ 1 n) (add-item xk1 (merge-fn x y) result)))
-			  ((positive? c)   (recur t1 r2 (+ 1 n) (add-item yk1 y result)))))))
-		
-	       ))))
-  (wrap union))
+  (lambda (m1 m2)
+    (let-values (((key-compare root)
+		  (union-trees m1 m2
+			       (lambda (k x) x)
+			       (lambda (k y) y)
+			       (lambda (k x y) (merge-fn x y)))))
+      (rb-tree-map key-compare new-root: root))))
 
 
 (define (union-withi merge-fn)
-  (define (union k1 k2 key-compare)
-    (lambda (t1 t2 n result)
-      (let recur ((t1 t1) (t2 t2) (n n) (result result))
-	(match (list (next t1) (next t2))
-	       
-	       (((($ rb-tree#tree 'Empty) _) (($ rb-tree#tree 'Empty) _))
-		(list n result))
-	       
-	       (((($ rb-tree#tree 'Empty) _) t2)
-		(map-insert t2 n result))
-	       
-	       ((t1 (($ rb-tree#tree 'Empty) _))
-		(map-insert t1 n result))
-	       
-	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree _ _ yk y _) r2))
-		(let ((xk1 (k1 xk)) (yk1 (k2 yk)))
-		  (let ((c (key-compare xk1 yk1)))
-		    (cond ((negative? c)   (recur r1 t2 (+ 1 n) (add-item xk1 x result)))
-			  ((zero? c)       (recur r1 r2 (+ 1 n) (add-item xk1 (merge-fn xk1 x y) result)))
-			  ((positive? c)   (recur t1 r2 (+ 1 n) (add-item yk1 y result)))))))
-	       
-	       ))))
-    (wrap union))
-
-	   
-(define (wrap-transform f)
-  (lambda (t1 t2)
-    (match-let (((n result kt1 kt2) (f (start t1) (start t2) 0 (Zero) '() '())))
-               (list n (link-all result) kt1 kt2))))
-
-  
-(define (map-transform f t n result kt)
-  (match t
-	 ((($ rb-tree#tree 'Empty) _)  
-	  (list n result kt))
-	 ((($ rb-tree#tree 'Tree _ _ xk x _) r)
-          (let ((x1 (f x)))
-            (map-transform f (next r) (+ 1 n) (add-item xk x1 result) (cons (cons xk x1) kt))))
-         ))
+  (lambda (m1 m2)
+    (let-values (((key-compare root)
+		  (union-trees m1 m2
+			       (lambda (k x) x)
+			       (lambda (k y) y)
+			       merge-fn)))
+      (rb-tree-map key-compare new-root: root))))
 
 
 (define (union-transform fn merge-fn)
-  (define (union kt1 kt2 key-compare)
-    (lambda (t1 t2 n result)
-      (let recur ((t1 t1) (t2 t2) (n n) (result result) (kt1 kt1) (kt2 kt2))
-	(match (list (next t1) (next t2))
-	       
-	       (((($ rb-tree#tree 'Empty) _) (($ rb-tree#tree 'Empty) _))
-		(list n result kt1 kt2))
-	       
-	       (((($ rb-tree#tree 'Empty) _) t2)
-		(match-let (((n result kt2) (map-transform fn t2 n result kt2)))
-                           (list n result kt1 kt2)))
-	       
-	       ((t1 (($ rb-tree#tree 'Empty) _))
-		(match-let (((n result kt1) (map-transform fn t1 n result kt1)))
-                           (list result kt1 kt2)))
-	       
-	       (((($ rb-tree#tree 'Tree _ _ xk x _) r1) (($ rb-tree#tree 'Tree _ _ yk y _) r2))
-		(let ((xk1 (kt1 xk)) (yk1 (kt2 yk)))
+  (lambda (m1 m2)
+    (let ((n 0) (kt1 '()) (kt2 '()))
+      (let-values (((key-compare root)
+		    (union-trees m1 m2
+				 (lambda (k x)
+				   (let ((x1 (fn x)))
+				     (set! n (+ 1 n))
+				     (set! kt1 (cons (cons x x1) kt1))
+				     x1))
+				 (lambda (k y)
+				   (let ((y1 (fn y)))
+				     (set! n (+ 1 n))
+				     (set! kt2 (cons (cons y y1) kt2))
+				     y1))
+				 (lambda (k x y)
+				   (let ((v (merge-fn x y)))
+				     (set! n (+ 1 n))
+				     (set! kt1 (cons (cons x v) kt1))
+				     (set! kt2 (cons (cons y v) kt2))
+				     v)))))
+	(list n (rb-tree-map key-compare new-root: root)
+	      (reverse kt1) (reverse kt2))))))
 
-		  (let ((c (key-compare xk1 yk1)))
-		    (cond ((negative? c)
-                           (let ((x1 (fn x)))
-                             (recur r1 t2 (+ 1 n) (add-item xk1 x1 result) (cons (cons xk1 x1) kt1) kt2)))
-			  ((zero? c)
-                           (let ((x1 (merge-fn x y)))
-                             (recur r1 r2 (+ 1 n) (add-item xk1 x1 result) (cons (cons xk1 x1) kt1) kt2)))
-			  ((positive? c)
-                           (let ((y1 (fn y)))
-                             (recur t1 r2 (+ 1 n) (add-item yk1 y1 result) kt1 (cons (cons yk1 y1) kt2))))
-                          ))
-                  ))
-		
-	       ))
-      ))
-  (wrap-transform union))
+
+;; Checks that the tree is ordered by key-compare, that no red node
+;; has a red child, and that every path from the root to an empty
+;; node has the same number of black nodes.  The root itself may be
+;; red.
+(define (tree-valid? key-compare root)
+  ;; lo and hi are #f or a one-element list holding a bound
+  (define (above? k lo) (or (not lo) (positive? (key-compare k (car lo)))))
+  (define (below? k hi) (or (not hi) (negative? (key-compare k (car hi)))))
+  ;; returns the black height of t, or #f if t is not valid
+  (define (check t lo hi parent-red?)
+    (cases tree t
+	   (Empty () 0)
+	   (Tree (c a k x b)
+		 (let ((red? (eq? c R)))
+		   (and (above? k lo) (below? k hi)
+			(not (and red? parent-red?))
+			(let ((ha (check a lo (list k) red?))
+			      (hb (check b (list k) hi red?)))
+			  (and ha hb (= ha hb)
+			       (if red? ha (+ 1 ha)))))))))
+  (and (check root #f #f #f) #t))
 
 
 (define (get-depth root)
@@ -700,10 +809,10 @@
              (apply-default-clause 'get-value key (list default-clause))))
        
        ((get-min self)
-        (get-min root))
+        (tree-min root))
        
        ((get-max self)
-        (get-max root))
+        (tree-max root))
 	  
        ((generate self p f g seed)
         (let recur ((new-root root) (seed seed))
@@ -722,29 +831,45 @@
           (rb-tree-map key-compare new-root: new-root)))
 	  
        ((delete self key)
-        (or (let* ((item+tree  (delete-assoc key-compare root key))
-                   (item (car item+tree))
-                   (new-root (cdr item+tree)))
-              (cons item (rb-tree-map key-compare new-root: new-root)))
-            (apply-default-clause 'delete key '())))
+        (let ((item+tree (delete-assoc key-compare root key)))
+          (if item+tree
+              (cons (car item+tree)
+                    (rb-tree-map key-compare new-root: (cdr item+tree)))
+              (apply-default-clause 'delete key '()))))
        
        ((for-each-ascending self f)
-        (for-each-ascending root f))
+        (tree-for-each-ascending root f))
        
        ((for-each-descending self f)
-        (for-each-descending root f))
+        (tree-for-each-descending root f))
+
+       ((for-each-range self lo hi f)
+        (tree-for-each-range key-compare root lo hi f))
+
+       ((gen-range self lo hi)
+        (range-generator key-compare root lo hi))
+
+       ((map-root self) root)
+
+       ((map-key-compare self) key-compare)
 
        ;; collection behaviors
        ((collection? self) #t)
        ((gen-keys self) (key-generator root))
        ((gen-elts self) (value-generator root))
        ((for-each-key self proc)
-        (for-each-ascending root (lambda (item) (proc (car item)))))
+        (tree-for-each-ascending root (lambda (item) (proc (car item)))))
        ((for-each-elt self proc)
-        (for-each-ascending root (lambda (item) (proc (cdr item)))))
+        (tree-for-each-ascending root (lambda (item) (proc (cdr item)))))
         
        ))
   )
+
+
+;; Returns #t if the tree of map m satisfies the ordering and
+;; red-black invariants, #f otherwise.
+(define (rb-tree-map-valid? m)
+  (tree-valid? (map-key-compare m) (map-root m)))
 
 
 )
