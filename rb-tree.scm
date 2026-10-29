@@ -12,7 +12,7 @@
 ;; Some helper code was borrowed from treap.scm by Oleg Kiselyov.
 ;;
 ;;
-;; Copyright 2007-2019 Ivan Raikov.
+;; Copyright 2007-2026 Ivan Raikov.
 ;;
 ;;
 ;; This program is free software: you can redistribute it and/or
@@ -172,40 +172,63 @@
 		 (display " " port)
 		 (loop (cdr objs)))))))
 
+
 (define R 'Red)
 (define B 'Black)
 
-(define (color? x) (or (eq? x 'Red) (eq? x 'Black)))
+(define-record-type node
+  (Tree color left key value right)
+  node?
+  (color node-color)
+  (left node-left)
+  (key node-key)
+  (value node-value)
+  (right node-right))
+
+(define (Empty) #f)
+
+(define (tree? x) (or (not x) (node? x)))
+
+(define (red? t) (and t (eq? (node-color t) R)))
+(define (black? t) (and t (eq? (node-color t) B)))
+
+;; The zipper of a deletion: the path from the root to the current
+;; subtree, innermost frame first.  A left frame records a node whose
+;; left subtree is being worked on, and a right frame one whose right
+;; subtree is.  The top of the path is #f.
+
+(define-record-type left-frame
+  (Left color key value tree zipper)
+  left-frame?
+  (color left-frame-color)
+  (key left-frame-key)
+  (value left-frame-value)
+  (tree left-frame-tree)
+  (zipper left-frame-zipper))
+
+(define-record-type right-frame
+  (Right color tree key value zipper)
+  right-frame?
+  (color right-frame-color)
+  (tree right-frame-tree)
+  (key right-frame-key)
+  (value right-frame-value)
+  (zipper right-frame-zipper))
+
+(define (Top) #f)
 
 
-(define-datatype tree tree?
-  (Empty)
-  (Tree  (color color?) (left tree?) (key identity) (value identity) (right tree?)))
+(define (tree-tag x) (if x 'Tree 'Empty))
 
 
-(define-datatype zipper zipper?
-  (Top) 
-  (Left (color color?) (key identity) (value identity) (tree tree?) (zipper zipper?))
-  (Right (color color?) (tree tree?) (key identity) (value identity) (zipper zipper?)))
-
-
-(define (tree-tag x)
-  (cases tree x
-	 (Empty () 'Empty)
-	 (Tree (c l k v r) 'Tree)))
-
-
-(set-record-printer! 'rb-tree#tree
+(set-record-printer! node
   (lambda (x out)
-    (cases tree x
-	   (Empty () (display "#(Empty)" out))
-	   (Tree (c l k v r)
-		 (display "#(Tree " out)
-		 (display (conc c " ") out)
-		 (display (tree-tag l) out)
-		 (display (conc " " k ":" v " ") out)
-		 (display (tree-tag r) out)
-		 (display ")" out)))))
+    (display "#(Tree " out)
+    (display (conc (node-color x) " ") out)
+    (display (tree-tag (node-left x)) out)
+    (display (conc " " (node-key x) ":" (node-value x) " ") out)
+    (display (tree-tag (node-right x)) out)
+    (display ")" out)))
 
 
 ;;
@@ -235,82 +258,81 @@
 
 ;; Adds a new association to the tree (or replaces the old one if existed).
 (define (insert key-compare value-merge root key value)
-    (let ins ((root root))
-      (cases tree root
-	   (Empty ()  (Tree R (Empty) key value (Empty)))
-	   (Tree (color a yk y b)  
-		 (dispatch-on-key key-compare 
-		      key yk 
-		      ;; Case 1: key < yk
-		      (match a
-			     (($ rb-tree#tree 'Tree 'Red c zk z d)
-			      (dispatch-on-key key-compare
-			       key zk
-			       ;; Case 1.1: key < zk
-			       (let ((c1 (ins c)))
-                                 (match c1
-                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
-                                         (Tree R (Tree B e wk w f) zk z (Tree B d yk y b)))
-                                        (else  (Tree B (Tree R c1 zk z d) yk y b))))
-			       ;; Case 1.2: key = zk
-			       (Tree color (Tree R c key (value-merge value z) d) yk y b)
-			       ;; Case 1.3: key > zk
-			       (let ((d1 (ins d)))
-                                 (match d1
-                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
-                                         (Tree R (Tree B c zk z e)  wk  w  (Tree B f yk y b)))
-                                        (else (Tree B (Tree R c zk z d1) yk y b))))))
-			     (else (let ((a1  (ins a)))
-                                     (Tree B a1 yk y b))))
-		      ;; Case 2: key  = yk
-		      (Tree color a key (value-merge value y) b)
-		      ;; Case 3: key  > yk
-		      (match b
-			     (($ rb-tree#tree 'Tree 'Red c zk z d)
-			      (dispatch-on-key key-compare
-			       key zk
-			       ;; Case 3.1: key < zk
-			       (let ((c1 (ins c)))
-                                 (match c1
-                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
-                                         (Tree R (Tree B a yk y e)  wk  w (Tree B f zk z d)))
-                                        (else (Tree B a yk y (Tree R c1 zk z d)))))
-			       ;; Case 3.2: key = zk
-			       (Tree color a yk y (Tree R c key (value-merge value z) d))
-			       ;; Case 3.3: key > zk
-			       (let ((d1 (ins d)))
-                                 (match d1
-                                        (($ rb-tree#tree 'Tree 'Red e wk w f)
-                                         (Tree R (Tree B a yk y c)  zk z (Tree B e wk w f)))
-                                        (else (Tree B a yk y (Tree R c zk z d1)))))))
-			     (else (let ((b1 (ins b)))
-				     (Tree B a yk y b1))))))))
-    )
+  (let ins ((root root))
+    (if (not root)
+        (Tree R #f key value #f)
+        (let ((color (node-color root))
+              (a (node-left root))
+              (yk (node-key root))
+              (y (node-value root))
+              (b (node-right root)))
+          (dispatch-on-key
+           key-compare key yk
+           ;; Case 1: key < yk
+           (if (red? a)
+               (let ((c (node-left a)) (zk (node-key a)) (z (node-value a)) (d (node-right a)))
+                 (dispatch-on-key
+                  key-compare key zk
+                  ;; Case 1.1: key < zk
+                  (let ((c1 (ins c)))
+                    (if (red? c1)
+                        (Tree R (Tree B (node-left c1) (node-key c1) (node-value c1) (node-right c1))
+                              zk z (Tree B d yk y b))
+                        (Tree B (Tree R c1 zk z d) yk y b)))
+                  ;; Case 1.2: key = zk
+                  (Tree color (Tree R c key (value-merge value z) d) yk y b)
+                  ;; Case 1.3: key > zk
+                  (let ((d1 (ins d)))
+                    (if (red? d1)
+                        (Tree R (Tree B c zk z (node-left d1)) (node-key d1) (node-value d1)
+                              (Tree B (node-right d1) yk y b))
+                        (Tree B (Tree R c zk z d1) yk y b)))))
+               (Tree B (ins a) yk y b))
+           ;; Case 2: key = yk
+           (Tree color a key (value-merge value y) b)
+           ;; Case 3: key > yk
+           (if (red? b)
+               (let ((c (node-left b)) (zk (node-key b)) (z (node-value b)) (d (node-right b)))
+                 (dispatch-on-key
+                  key-compare key zk
+                  ;; Case 3.1: key < zk
+                  (let ((c1 (ins c)))
+                    (if (red? c1)
+                        (Tree R (Tree B a yk y (node-left c1)) (node-key c1) (node-value c1)
+                              (Tree B (node-right c1) zk z d))
+                        (Tree B a yk y (Tree R c1 zk z d))))
+                  ;; Case 3.2: key = zk
+                  (Tree color a yk y (Tree R c key (value-merge value z) d))
+                  ;; Case 3.3: key > zk
+                  (let ((d1 (ins d)))
+                    (if (red? d1)
+                        (Tree R (Tree B a yk y c) zk z
+                              (Tree B (node-left d1) (node-key d1) (node-value d1) (node-right d1)))
+                        (Tree B a yk y (Tree R c zk z d1))))))
+               (Tree B a yk y (ins b))))))))
 
 
 ;; Looks for an item: Given a key, returns the corresponding (key
 ;; . value) association or #f if the tree does not contain an
 ;; association with that key.
 (define (find-assoc key-compare root key)
-    (let recur ((root root))
-      (cases tree root 
-	     (Empty ()  #f)
-	     (Tree (c a yk y b)
-		   (dispatch-on-key key-compare 
-				    key yk (recur a) (cons yk y) (recur b)))))
-    )
+  (let recur ((root root))
+    (and root
+         (dispatch-on-key key-compare key (node-key root)
+                          (recur (node-left root))
+                          (cons (node-key root) (node-value root))
+                          (recur (node-right root))))))
 
 ;; Looks for an item: Given a key, returns the value of the
 ;; corresponding (key . value) association or #f if the tree does
 ;; not contain an association with that key.
 (define (find-ref key-compare root key)
-    (let recur ((root root))
-      (cases tree root 
-	     (Empty ()  #f)
-	     (Tree (c a yk y b)
-		   (dispatch-on-key key-compare 
-				    key yk (recur a) y (recur b)))))
-    )
+  (let recur ((root root))
+    (and root
+         (dispatch-on-key key-compare key (node-key root)
+                          (recur (node-left root))
+                          (node-value root)
+                          (recur (node-right root))))))
 
 ;; Finds an association with a given key, and deletes it.  Returns
 ;; the (key . value) pair of the deleted association, or #f if it
@@ -319,87 +341,122 @@
 (define (delete-assoc key-compare root key)
 
   (define (zip zipper tree)
-    (match (cons zipper tree)
-	   ((($ rb-tree#zipper 'Top) . a)  tree)
-	   ((($ rb-tree#zipper 'Left color xk x b z) . a)   (zip z (Tree color a xk x b)))
-	   ((($ rb-tree#zipper 'Right color a xk x z) . b)  (zip z (Tree color a xk x b)))))
-  
+    (cond ((not zipper) tree)
+          ((left-frame? zipper)
+           (zip (left-frame-zipper zipper)
+                (Tree (left-frame-color zipper) tree (left-frame-key zipper)
+                      (left-frame-value zipper) (left-frame-tree zipper))))
+          (else
+           (zip (right-frame-zipper zipper)
+                (Tree (right-frame-color zipper) (right-frame-tree zipper)
+                      (right-frame-key zipper) (right-frame-value zipper) tree)))))
+
+  ;; The black node with the fields of the black or red node T.
+  (define (as-black t)
+    (Tree B (node-left t) (node-key t) (node-value t) (node-right t)))
+  (define (as-red t)
+    (Tree R (node-left t) (node-key t) (node-value t) (node-right t)))
+
   ;; bbZip propagates a black deficit up the tree until either
   ;; the top is reached, or the deficit can be covered.  It
   ;; returns a boolean that is true if there is still a deficit
-  ;; and the zipped tree.
+  ;; and the zipped tree.  The cases are tried in the order given.
   (define (bbZip zipper tree)
-    (match (cons zipper tree)
-	   ((($ rb-tree#zipper 'Top) . a)  (cons #t a))
-	   ;; a red replacement node covers the deficit by turning black
-	   ((z . ($ rb-tree#tree 'Tree 'Red a xk x b))
-	    (cons #f (zip z (Tree B a xk x b))))
-	   ;; case 1L
-	   ((($ rb-tree#zipper 'Left 'Black xk x ($ rb-tree#tree 'Tree 'Red c yk y d) z) . a)
-	    (bbZip (Left R xk x c (Left B yk y d z)) a))
-	   ;; case 3L 
-	   ((($ rb-tree#zipper 'Left color xk x ($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Tree 'Red c yk y d) wk w e) z) . a)
-	    (bbZip (Left color xk x (Tree B c yk y (Tree R d wk w e)) z) a))
-	   ;; case 4L 
-	   ((($ rb-tree#zipper 'Left color xk x ($ rb-tree#tree 'Tree 'Black c yk y ($ rb-tree#tree 'Tree 'Red d wk w e)) z) . a)
-	    (cons #f (zip z (Tree color (Tree B a xk x c) yk y (Tree B d wk w e)))))
-	   ;; case 2L 
-	   ((($ rb-tree#zipper 'Left 'Red xk x ($ rb-tree#tree 'Tree 'Black c yk y d) z) . a)
-	    (cons #f (zip z (Tree B a xk x (Tree R c yk y d)))))
-	   ;; case 2L 
-	   ((($ rb-tree#zipper 'Left 'Black xk x ($ rb-tree#tree 'Tree 'Black c yk y d) z) . a)
-	    (bbZip z (Tree B a xk x (Tree R c yk y d))))
-	   ;; case 1R 
-	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Red c yk y d) xk x z) . b) 
-	    (bbZip (Right R d xk x (Right B c yk y z)) b))
-	   ;; case 3R
-	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black c yk y ($ rb-tree#tree 'Tree 'Red d wk w e)) xk x z) . b)
-	    (bbZip (Right color (Tree B (Tree R c yk y d) wk w e) xk x z) b))
-	   ;; case 4R
-	   ((($ rb-tree#zipper 'Right color ($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Tree 'Red c wk w d) yk y e) xk x z) . b)
-	    (cons #f (zip z (Tree color (Tree B c wk w d) yk y (Tree B e xk x b)))))
-	   ;; case 2R 
-	   ((($ rb-tree#zipper 'Right 'Red ($ rb-tree#tree 'Tree 'Black c yk y d) xk x z) . b) 
-	    (cons #f (zip z (Tree B (Tree R c yk y d) xk x b))))
-	   ;; case 2R 
-	   ((($ rb-tree#zipper 'Right 'Black ($ rb-tree#tree 'Tree 'Black c yk y d) xk x z) . b) 
-	    (bbZip z (Tree B (Tree R c yk y d) xk x b)))
-	   (else   (cons #f (zip zipper tree)))))
-  
+    (cond
+     ((not zipper) (cons #t tree))
+     ;; a red replacement node covers the deficit by turning black
+     ((red? tree) (cons #f (zip zipper (as-black tree))))
+     ((left-frame? zipper)
+      (let ((color (left-frame-color zipper))
+            (xk (left-frame-key zipper))
+            (x (left-frame-value zipper))
+            (s (left-frame-tree zipper))
+            (z (left-frame-zipper zipper))
+            (a tree))
+        (cond
+         ;; case 1L
+         ((and (eq? color B) (red? s))
+          (bbZip (Left R xk x (node-left s) (Left B (node-key s) (node-value s) (node-right s) z)) a))
+         ;; case 3L
+         ((and (black? s) (red? (node-left s)))
+          (let ((l (node-left s)))
+            (bbZip (Left color xk x
+                         (Tree B (node-left l) (node-key l) (node-value l)
+                               (Tree R (node-right l) (node-key s) (node-value s) (node-right s)))
+                         z)
+                   a)))
+         ;; case 4L
+         ((and (black? s) (red? (node-right s)))
+          (cons #f (zip z (Tree color (Tree B a xk x (node-left s)) (node-key s) (node-value s)
+                                (as-black (node-right s))))))
+         ;; case 2L, red parent
+         ((and (eq? color R) (black? s))
+          (cons #f (zip z (Tree B a xk x (as-red s)))))
+         ;; case 2L, black parent
+         ((and (eq? color B) (black? s))
+          (bbZip z (Tree B a xk x (as-red s))))
+         (else (cons #f (zip zipper tree))))))
+     (else
+      (let ((color (right-frame-color zipper))
+            (s (right-frame-tree zipper))
+            (xk (right-frame-key zipper))
+            (x (right-frame-value zipper))
+            (z (right-frame-zipper zipper))
+            (b tree))
+        (cond
+         ;; case 1R
+         ((red? s)
+          (bbZip (Right R (node-right s) xk x (Right B (node-left s) (node-key s) (node-value s) z)) b))
+         ;; case 3R
+         ((and (black? s) (red? (node-right s)))
+          (let ((r (node-right s)))
+            (bbZip (Right color
+                          (Tree B (Tree R (node-left s) (node-key s) (node-value s) (node-left r))
+                                (node-key r) (node-value r) (node-right r))
+                          xk x z)
+                   b)))
+         ;; case 4R
+         ((and (black? s) (red? (node-left s)))
+          (cons #f (zip z (Tree color (as-black (node-left s)) (node-key s) (node-value s)
+                                (Tree B (node-right s) xk x b)))))
+         ;; case 2R, red parent
+         ((and (eq? color R) (black? s))
+          (cons #f (zip z (Tree B (as-red s) xk x b))))
+         ;; case 2R, black parent
+         ((and (eq? color B) (black? s))
+          (bbZip z (Tree B (as-red s) xk x b)))
+         (else (cons #f (zip zipper tree))))))))
+
   (define (delMin tree z)
-    (match tree
-	   (($ rb-tree#tree 'Tree 'Red ($ rb-tree#tree 'Empty) yk y b) 
-	    (values yk y (cons #f (zip z b))))
-	   (($ rb-tree#tree 'Tree 'Black ($ rb-tree#tree 'Empty) yk y b)
-	    (values yk y (bbZip z b)))
-	   (($ rb-tree#tree 'Tree color a yk y b) 
-	    (delMin a (Left color yk y b z)))
-	   (($ rb-tree#tree 'Empty) (rb-tree:error 'delete "invalid tree"))))
-  
-  (define join
-    (match-lambda* 
-     (( 'Red ($ rb-tree#tree 'Empty) ($ rb-tree#tree 'Empty) z)  
-      (zip z (Empty)))
-     (( _ a ($ rb-tree#tree 'Empty) z)  
-      (cdr  (bbZip z a)))
-     (( _ ($ rb-tree#tree 'Empty) b z)
-      (cdr  (bbZip z b)))
-     ((color a b z)
-      (let-values (((xk x b)  (delMin b (Top))))
-        (match b
-               ;; the deficit is in the new right subtree b1
-               ((#t . b1)  (cdr  (bbZip (Right color a xk x z) b1)))
-               ((#f . b1)  (zip z (Tree color a xk x b1))))))))
-  
+    (cond ((not tree) (rb-tree:error 'delete "invalid tree"))
+          ((not (node-left tree))
+           (if (eq? (node-color tree) R)
+               (values (node-key tree) (node-value tree) (cons #f (zip z (node-right tree))))
+               (values (node-key tree) (node-value tree) (bbZip z (node-right tree)))))
+          (else
+           (delMin (node-left tree)
+                   (Left (node-color tree) (node-key tree) (node-value tree) (node-right tree) z)))))
+
+  (define (join color a b z)
+    (cond ((and (eq? color R) (not a) (not b)) (zip z #f))
+          ((not b) (cdr (bbZip z a)))
+          ((not a) (cdr (bbZip z b)))
+          (else
+           (let-values (((xk x b) (delMin b (Top))))
+             (if (car b)
+                 ;; the deficit is in the new right subtree
+                 (cdr (bbZip (Right color a xk x z) (cdr b)))
+                 (zip z (Tree color a xk x (cdr b))))))))
+
   (define (del tree key z)
-    (match tree 
-	   (($ rb-tree#tree 'Empty)  #f)
-	   (($ rb-tree#tree 'Tree color a yk y b)  
-	    (dispatch-on-key key-compare 
-	     key yk 
-	     (del a key (Left color yk y b z))
-	     (cons (cons yk y) (join color a b z))
-	     (del b key (Right color a yk y z))))))
+    (and tree
+         (let ((color (node-color tree)) (a (node-left tree)) (yk (node-key tree))
+               (y (node-value tree)) (b (node-right tree)))
+           (dispatch-on-key key-compare
+                            key yk
+                            (del a key (Left color yk y b z))
+                            (cons (cons yk y) (join color a b z))
+                            (del b key (Right color a yk y z))))))
 
   (del root key (Top)))
 
@@ -409,37 +466,35 @@
 ;; for-each-descending, so that they do not shadow those operations.
 
 (define (tree-min root)
-  (let recur ((root root))
-    (cases tree root
-	   (Empty () #f)
-	   (Tree (c a xk x b)
-		 (cases tree a
-			(Empty () (cons xk x))
-			(Tree (c1 a1 xk1 x1 b1) (recur a)))))))
+  (and root
+       (let recur ((t root))
+         (if (node-left t)
+             (recur (node-left t))
+             (cons (node-key t) (node-value t))))))
 
 
 (define (tree-max root)
-  (let recur ((root root))
-    (cases tree root
-	   (Empty () #f)
-	   (Tree (c a xk x b)
-		 (cases tree b
-			(Empty () (cons xk x))
-			(Tree (c1 a1 xk1 x1 b1) (recur b)))))))
+  (and root
+       (let recur ((t root))
+         (if (node-right t)
+             (recur (node-right t))
+             (cons (node-key t) (node-value t))))))
 
 
 (define (tree-for-each-ascending root f)
   (let appf ((t root))
-    (cases tree t
-	   (Empty () (void))
-	   (Tree (c a k x b) (appf a) (f (cons k x)) (appf b)))))
+    (when t
+      (appf (node-left t))
+      (f (cons (node-key t) (node-value t)))
+      (appf (node-right t)))))
 
 
 (define (tree-for-each-descending root f)
   (let appf ((t root))
-    (cases tree t
-	   (Empty () (void))
-	   (Tree (c a k x b) (appf b) (f (cons k x)) (appf a)))))
+    (when t
+      (appf (node-right t))
+      (f (cons (node-key t) (node-value t)))
+      (appf (node-left t)))))
 
 
 ;; Range traversal over the half-open key interval [lo, hi).  Either
@@ -451,18 +506,16 @@
 
 (define (range-start key-compare root lo)
   (let descend ((t root) (stack '()))
-    (cases tree t
-	   (Empty () stack)
-	   (Tree (c a k x b)
-		 (if (and lo (negative? (key-compare k lo)))
-		     (descend b stack)
-		     (descend a (cons t stack)))))))
+    (cond ((not t) stack)
+          ((and lo (negative? (key-compare (node-key t) lo)))
+           (descend (node-right t) stack))
+          (else (descend (node-left t) (cons t stack))))))
 
 
 (define (range-push-left t stack)
-  (cases tree t
-	 (Empty () stack)
-	 (Tree (c a k x b) (range-push-left a (cons t stack)))))
+  (if t
+      (range-push-left (node-left t) (cons t stack))
+      stack))
 
 
 (define (in-range? key-compare hi k)
@@ -471,31 +524,27 @@
 
 (define (tree-for-each-range key-compare root lo hi f)
   (let loop ((stack (range-start key-compare root lo)))
-    (if (pair? stack)
-	(cases tree (car stack)
-	       (Empty () (void))
-	       (Tree (c a k x b)
-		     (when (in-range? key-compare hi k)
-		       (f (cons k x))
-		       (loop (range-push-left b (cdr stack)))))))))
+    (when (pair? stack)
+      (let ((t (car stack)))
+        (when (in-range? key-compare hi (node-key t))
+          (f (cons (node-key t) (node-value t)))
+          (loop (range-push-left (node-right t) (cdr stack))))))))
 
 
 (define (range-generator key-compare root lo hi)
   (let ((s (make-root (range-start key-compare root lo))))
     (lambda ()
       (let ((stack (root-val s)))
-	(if (null? stack)
-	    (eof-object)
-	    (cases tree (car stack)
-		   (Empty () (eof-object))
-		   (Tree (c a k x b)
-			 (if (in-range? key-compare hi k)
-			     (begin
-			       (root-val-set! s (range-push-left b (cdr stack)))
-			       (cons k x))
-			     (begin
-			       (root-val-set! s '())
-			       (eof-object))))))))))
+        (if (null? stack)
+            (eof-object)
+            (let ((t (car stack)))
+              (if (in-range? key-compare hi (node-key t))
+                  (begin
+                    (root-val-set! s (range-push-left (node-right t) (cdr stack)))
+                    (cons (node-key t) (node-value t)))
+                  (begin
+                    (root-val-set! s '())
+                    (eof-object)))))))))
   
 (define (apply-default-clause label key default-clause)
   (cond
@@ -506,24 +555,17 @@
    ((procedure? (car default-clause)) ((car default-clause)))
    (else (car default-clause))))
 
-;; functions for walking the tree while keeping a stack of parents to
-;; be visited.
-
-
-(define (next lst)
-  (match lst
-	 (((and t ($ rb-tree#tree 'Tree _ _ _ _ b)) . rest)  
-	  (list t (left b rest)))
-	 
-	 (else (list (Empty) '()))))
-
-(define (left t rest)
-  (match t
-	 (($ rb-tree#tree 'Empty) rest)
-	 ((and t ($ rb-tree#tree 'Tree _ a _ _ _)) 
-	  (left a (cons t rest)))))
-
-(define (start t) (left t '()))
+;; A generator of (PROJECT node) for the nodes of the tree in
+;; ascending order of keys.
+(define (node-generator root project)
+  (let ((s (make-root (range-push-left root '()))))
+    (lambda ()
+      (let ((stack (root-val s)))
+        (if (null? stack)
+            (eof-object)
+            (let ((t (car stack)))
+              (root-val-set! s (range-push-left (node-right t) (cdr stack)))
+              (project t)))))))
 
 
 ;; Support for constructing red-black trees in linear time from
@@ -574,9 +616,9 @@
 ;; pairs in ascending order of keys.
 (define (tree->list root)
   (let recur ((t root) (acc '()))
-    (cases tree t
-	   (Empty () acc)
-	   (Tree (c a k x b) (recur a (cons (cons k x) (recur b acc)))))))
+    (if t
+        (recur (node-left t) (cons (cons (node-key t) (node-value t)) (recur (node-right t) acc)))
+        acc)))
 
 
 ;; Folds over the union of two ascending association lists in
@@ -700,36 +742,33 @@
   (define (below? k hi) (or (not hi) (negative? (key-compare k (car hi)))))
   ;; returns the black height of t, or #f if t is not valid
   (define (check t lo hi parent-red?)
-    (cases tree t
-	   (Empty () 0)
-	   (Tree (c a k x b)
-		 (let ((red? (eq? c R)))
-		   (and (above? k lo) (below? k hi)
-			(not (and red? parent-red?))
-			(let ((ha (check a lo (list k) red?))
-			      (hb (check b (list k) hi red?)))
-			  (and ha hb (= ha hb)
-			       (if red? ha (+ 1 ha)))))))))
+    (cond ((not t) 0)
+          ((not (node? t)) #f)
+          (else
+           (let ((red? (eq? (node-color t) R)) (k (node-key t)))
+             (and (memq (node-color t) (list R B))
+                  (above? k lo) (below? k hi)
+                  (not (and red? parent-red?))
+                  (let ((ha (check (node-left t) lo (list k) red?))
+                        (hb (check (node-right t) (list k) hi red?)))
+                    (and ha hb (= ha hb)
+                         (if red? ha (+ 1 ha)))))))))
   (and (check root #f #f #f) #t))
 
 
 (define (get-depth root)
   (let loop ((node root) (level 0))
-    (match node 
-           (($ rb-tree#tree 'Empty)  level)
-           (($ rb-tree#tree 'Tree _ a _ _ b)  
-            (max (loop a (+ 1 level))
-                 (loop b (+ 1 level)))))))
+    (if node
+        (max (loop (node-left node) (+ 1 level))
+             (loop (node-right node) (+ 1 level)))
+        level)))
 
 
 (define (get-size root)
   (let loop ((node root))
-    (match node 
-           (($ rb-tree#tree 'Empty) 0)
-           (($ rb-tree#tree 'Tree _ a _ _ b)
-            (+ 1 (loop a) (loop b)))
-           ))
-  )
+    (if node
+        (+ 1 (loop (node-left node)) (loop (node-right node)))
+        0)))
 
 (define-record-type <root>
   (make-root val)
@@ -737,44 +776,10 @@
   (val root-val root-val-set!))
 
 
-(define (value-generator root)
-  (let ((s (make-root
-            (match (start root)
-                   ((fst . rst) 
-                    (cons fst rst))
-                   (else '())))))
-    (lambda ()
-      (let ((sval (root-val s)))
-        (if (null? sval)
-            (eof-object)
-            (match-let (((t sval-next) (next sval)))
-                       (root-val-set! s sval-next)
-                       (cases tree t
-                              (Empty () (eof-object))
-                              (Tree (c l k v r) v))
-                       ))
-        ))
-    ))
+(define (value-generator root) (node-generator root node-value))
 
 
-(define (key-generator root)
-  (let ((s (make-root
-            (match (start root)
-                   ((fst . rst)
-                    (cons fst rst))
-                   (else '())))))
-    (lambda ()
-      (let ((sval (root-val s)))
-        (if (null? sval)
-            (eof-object)
-            (match-let (((t sval-next) (next sval)))
-                       (root-val-set! s sval-next)
-                       (cases tree t
-                              (Empty () (eof-object))
-                              (Tree (c l k v r) k))
-                       ))
-        ))
-    ))
+(define (key-generator root) (node-generator root node-key))
 
 
 
@@ -787,10 +792,7 @@
       ((persistent-map? self) #t)
       ((size self) (get-size root))
       
-      ((empty? self)
-       (cases tree root
-              (Empty () #t)
-              (else #f)))
+      ((empty? self) (not root))
       
        ((get self key)
         (or (find-assoc key-compare root key)
